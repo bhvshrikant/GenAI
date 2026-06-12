@@ -1,0 +1,3508 @@
+import React, { useState, useEffect, useRef } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import {
+  CheckCircle2,
+  AlertTriangle,
+  Calendar,
+  Award,
+  BookOpen,
+  Sparkles,
+  Upload,
+  Database,
+  User,
+  Phone,
+  Mail,
+  ArrowRight,
+  Clock,
+  ArrowLeft,
+  CheckCircle,
+  XCircle,
+  Plus,
+  Settings,
+  Shield,
+  Layers,
+  FileText,
+  ChevronRight,
+  HelpCircle,
+  Play,
+  RotateCcw,
+  BarChart2,
+  Edit,
+  Trash2,
+  Search,
+  X,
+  Save,
+  Download,
+  Cloud,
+  RefreshCw
+} from 'lucide-react';
+import { TaxonomyItem, Question, User as UserType, TestAttempt, QuestionResponse } from './types.ts';
+import Latex from './components/Latex.tsx';
+
+// Format percentile as highly realistic high-precision 95% confidence interval range
+export function formatPercentileRange(p: number | undefined | null): string {
+  if (p === undefined || p === null || p === 0) return '0.00000 %ile';
+  if (p === 100) return '99.98234 to 100.00000 %ile';
+  
+  // Realistically narrow confidence window centered at the calculated percentile point
+  let low = p - 0.03994;
+  let high = p + 0.03995;
+  
+  if (low < 0.0001) low = 0.01234;
+  if (high > 99.9999) high = 100.00000;
+  
+  return `${low.toFixed(5)} to ${high.toFixed(5)} %ile`;
+}
+
+export default function App() {
+  // Local session states
+  const [currentUser, setCurrentUser] = useState<UserType | null>(null);
+  const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'exam' | 'result' | 'admin'>('landing');
+
+  const isAdmin = currentUser?.email_id?.toLowerCase().trim() === 'bhvshrikant@gmail.com';
+
+  // Safety redirect for non-admins trying to access admin view
+  useEffect(() => {
+    if (currentUser && currentView === 'admin' && !isAdmin) {
+      setCurrentView('dashboard');
+    }
+  }, [currentView, currentUser, isAdmin]);
+
+  // Login form states
+  const [loginForm, setLoginForm] = useState({
+    username: '',
+    email_id: '',
+    mobile_number: '',
+    dob: '2006-05-15',
+    password: '',
+  });
+
+  const [adminUsers, setAdminUsers] = useState<UserType[]>([]);
+  const [adminAttempts, setAdminAttempts] = useState<any[]>([]);
+  const [loadingAdminTables, setLoadingAdminTables] = useState(false);
+
+  // Database / Seeding states
+  const [taxonomy, setTaxonomy] = useState<(TaxonomyItem & { question_count: number })[]>([]);
+  const [testHistory, setTestHistory] = useState<TestAttempt[]>([]);
+  const [loadingHistory, setLoadingHistory] = useState(false);
+
+  // New exam builder wizard states
+  const [showNewTestWizard, setShowNewTestWizard] = useState(false);
+  const [selectedChapters, setSelectedChapters] = useState<string[]>([]);
+  const [warningData, setWarningData] = useState<{
+    warning: boolean;
+    message: string;
+    availableCounts: { [sub: string]: { MCQ: number; NVQ: number } };
+  } | null>(null);
+
+  // Active testing states
+  const [activeAttempt, setActiveAttempt] = useState<TestAttempt | null>(null);
+  const [examQuestions, setExamQuestions] = useState<Question[]>([]);
+  const [currentQuestionIndex, setCurrentQuestionIndex] = useState(0);
+  const [selectedSubject, setSelectedSubject] = useState<'PHYSICS' | 'CHEMISTRY' | 'MATHEMATICS'>('PHYSICS');
+  const [quizTimer, setQuizTimer] = useState(10800); // 3 hours (180 mins) in seconds
+  const [userAnswers, setUserAnswers] = useState<{ [qid: number]: { selected_answer: string | null; time_spent_seconds: number; palette_status: 'NOT_VISITED' | 'NOT_ANSWERED' | 'ANSWERED' | 'MARKED_FOR_REVIEW' | 'ANSWERED_MARKED_FOR_REVIEW' } }>({});
+  const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const questionStartTimeRef = useRef<number>(Date.now());
+
+  // Result / Analytics view states
+  const [selectedResultAttempt, setSelectedResultAttempt] = useState<TestAttempt | null>(null);
+  const [reviewActiveQuestionIndex, setReviewActiveQuestionIndex] = useState(0);
+  const [reviewActiveSubject, setReviewActiveSubject] = useState<'PHYSICS' | 'CHEMISTRY' | 'MATHEMATICS'>('PHYSICS');
+
+  // Admin / ETL parser states
+  const [questionPdfUrl, setQuestionPdfUrl] = useState<string | null>(null);
+  const [solutionPdfUrl, setSolutionPdfUrl] = useState<string | null>(null);
+  const [questionPdfBase64, setQuestionPdfBase64] = useState<string>('');
+  const [solutionPdfBase64, setSolutionPdfBase64] = useState<string>('');
+  const [adminSubject, setAdminSubject] = useState<'PHYSICS' | 'CHEMISTRY' | 'MATHEMATICS'>('PHYSICS');
+  const [parsingLogs, setParsingLogs] = useState<string[]>([]);
+  const [isParsing, setIsParsing] = useState(false);
+  const [parsedQuestionsCount, setParsedQuestionsCount] = useState<number | null>(null);
+
+  // Creator Library State Variables
+  const [adminQuestions, setAdminQuestions] = useState<Question[]>([]);
+  const [loadingAdminQuestions, setLoadingAdminQuestions] = useState(false);
+  const [adminSearch, setAdminSearch] = useState('');
+  const [adminSubjectFilter, setAdminSubjectFilter] = useState<'ALL' | 'PHYSICS' | 'CHEMISTRY' | 'MATHEMATICS'>('ALL');
+  const [adminEditingQuestion, setAdminEditingQuestion] = useState<Question | null>(null);
+  const [adminSavingId, setAdminSavingId] = useState<number | null>(null);
+  const [wipeState, setWipeState] = useState<'idle' | 'warning1' | 'confirm_all'>('idle');
+  const [wipeStatusMessage, setWipeStatusMessage] = useState<string | null>(null);
+
+  // Inactivity Auto-Logout Mechanism State & Hook (30 Minutes, bypassed if currentView === 'exam')
+  const [showInactivityWarning, setShowInactivityWarning] = useState(false);
+  const [warningCountdown, setWarningCountdown] = useState(60);
+  const [showInactivityAlert, setShowInactivityAlert] = useState(false);
+
+  const warningTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const finalLogoutTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const countdownIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  useEffect(() => {
+    if (!currentUser || currentView === 'exam') {
+      if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+      if (finalLogoutTimeoutRef.current) clearTimeout(finalLogoutTimeoutRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      setShowInactivityWarning(false);
+      return;
+    }
+
+    const WARNING_TIMEOUT = 29 * 60 * 1000; // 29 minutes
+    const FINAL_TIMEOUT = 1 * 60 * 1000; // 1 minute warning countdown
+
+    const performLogout = () => {
+      localStorage.removeItem('jee_user');
+      setCurrentUser(null);
+      setCurrentView('landing');
+      setShowInactivityWarning(false);
+      setShowInactivityAlert(true);
+      setTimeout(() => setShowInactivityAlert(false), 9500);
+
+      if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+      if (finalLogoutTimeoutRef.current) clearTimeout(finalLogoutTimeoutRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+    };
+
+    const startCountdown = () => {
+      setWarningCountdown(60);
+      setShowInactivityWarning(true);
+
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      countdownIntervalRef.current = setInterval(() => {
+        setWarningCountdown(prev => {
+          if (prev <= 1) {
+            clearInterval(countdownIntervalRef.current!);
+            return 0;
+          }
+          return prev - 1;
+        });
+      }, 1000);
+
+      if (finalLogoutTimeoutRef.current) clearTimeout(finalLogoutTimeoutRef.current);
+      finalLogoutTimeoutRef.current = setTimeout(() => {
+        performLogout();
+      }, FINAL_TIMEOUT);
+    };
+
+    const resetTimer = () => {
+      setShowInactivityWarning(false);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+      if (finalLogoutTimeoutRef.current) clearTimeout(finalLogoutTimeoutRef.current);
+
+      if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+      warningTimeoutRef.current = setTimeout(() => {
+        startCountdown();
+      }, WARNING_TIMEOUT);
+    };
+
+    // Bind human events
+    const events = ['mousemove', 'keydown', 'click', 'scroll', 'touchstart'];
+    events.forEach(event => {
+      window.addEventListener(event, resetTimer);
+    });
+
+    resetTimer();
+
+    return () => {
+      if (warningTimeoutRef.current) clearTimeout(warningTimeoutRef.current);
+      if (finalLogoutTimeoutRef.current) clearTimeout(finalLogoutTimeoutRef.current);
+      if (countdownIntervalRef.current) clearInterval(countdownIntervalRef.current);
+
+      events.forEach(event => {
+        window.removeEventListener(event, resetTimer);
+      });
+    };
+  }, [currentUser, currentView]);
+
+  // Database backup and sync states
+  const [googleAccessToken, setGoogleAccessToken] = useState(() => localStorage.getItem('jee_google_access_token') || '');
+  const [googleClientId, setGoogleClientId] = useState(() => localStorage.getItem('jee_google_client_id') || '');
+  const [isGdriveSyncing, setIsGdriveSyncing] = useState(false);
+  const [isManualRestoring, setIsManualRestoring] = useState(false);
+  const [lastSyncTime, setLastSyncTime] = useState<string | null>(() => localStorage.getItem('jee_last_sync_time'));
+  const [syncStatus, setSyncStatus] = useState<{ type: 'success' | 'error' | 'info'; message: string; details?: string } | null>(null);
+  const triggerStatus = (type: 'success' | 'error' | 'info', message: string, details?: string) => {
+    setSyncStatus({ type, message, details });
+  };
+
+  // Sync server database schema to client-side localStorage backup mirror
+  const syncLocalMirrorAndBackup = async () => {
+    try {
+      const res = await fetch('/api/admin/get-full-db');
+      if (res.ok) {
+        const db = await res.json();
+        if (db && Array.isArray(db.questions)) {
+          localStorage.setItem('jee_mains_full_db_backup', JSON.stringify(db));
+          const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setLastSyncTime(timeStr);
+          localStorage.setItem('jee_last_sync_time', timeStr);
+        }
+      }
+    } catch (err) {
+      console.error('Error auto-mirroring database to client storage:', err);
+    }
+  };
+
+  // Perform a manual check and auto-restore if the server database has been wiped / reset
+  const initializeAndRestoreIfNeeded = async () => {
+    try {
+      // 1. Check if server database has any parsed questions
+      const res = await fetch('/api/db/taxonomy');
+      const data = await res.json();
+      const serverHasQuestions = data.taxonomy && data.taxonomy.some((t: any) => t.question_count > 0);
+      
+      const savedBackupStr = localStorage.getItem('jee_mains_full_db_backup');
+      
+      if (savedBackupStr) {
+        const backup = JSON.parse(savedBackupStr);
+        const backupHasQuestions = backup.questions && backup.questions.length > 0;
+        
+        if (!serverHasQuestions && backupHasQuestions) {
+          console.log('Detected unseeded server db. Auto-restoring from active client backup...');
+          setIsManualRestoring(true);
+          const restoreRes = await fetch('/api/admin/restore-db', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: savedBackupStr,
+          });
+          const restoreData = await restoreRes.json();
+          setIsManualRestoring(false);
+          if (restoreData.success) {
+            console.log('Auto-restorer: Server database synchronized successfully from local copy.');
+            fetchTaxonomy();
+            
+            // Relogin matching user
+            const savedUser = localStorage.getItem('jee_user');
+            if (savedUser) {
+              const parsedUser = JSON.parse(savedUser);
+              const matchedUser = backup.users.find((u: any) => u.email_id?.toLowerCase() === parsedUser.email_id?.toLowerCase() || u.mobile_number === parsedUser.mobile_number);
+              if (matchedUser) {
+                setCurrentUser(matchedUser);
+                localStorage.setItem('jee_user', JSON.stringify(matchedUser));
+                fetchUserHistory(matchedUser.id);
+              }
+            }
+          }
+        } else if (serverHasQuestions) {
+          // Keep our local backup updated
+          await syncLocalMirrorAndBackup();
+        }
+      } else {
+        // First-time load: populate database backup from server since server has seed data
+        if (serverHasQuestions) {
+          await syncLocalMirrorAndBackup();
+        }
+      }
+    } catch (err) {
+      console.error('Core synchronizer failed:', err);
+    }
+  };
+
+  const handleLocalBackupRestoreFromFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const backupData = JSON.parse(text);
+      if (!backupData.questions || !Array.isArray(backupData.questions)) {
+        triggerStatus('error', 'Malformed File Content', 'Selected JSON format does not appear to be a valid JEE mains database backup.');
+        return;
+      }
+      setIsManualRestoring(true);
+      const res = await fetch("/api/admin/restore-db", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: text,
+      });
+      const data = await res.json();
+      setIsManualRestoring(false);
+      if (data.success) {
+        triggerStatus('success', 'Local Database Restored!', `Successfully synchronized server state with ${data.counts.questions} questions, ${data.counts.users} candidates, and ${data.counts.attempts} test records.`);
+        // Sync back to client storage
+        localStorage.setItem("jee_mains_full_db_backup", text);
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastSyncTime(timeStr);
+        fetchTaxonomy();
+        fetchAdminQuestions();
+        fetchAdminLogs();
+      } else {
+        triggerStatus('error', 'Database Restore Failed', data.error || 'Server rejected the restoration schema.');
+      }
+    } catch (err: any) {
+      triggerStatus('error', 'Read Error', err.message || 'Could not parse the selected backup file.');
+    }
+  };
+
+  const getOrCreateAppFolder = async (token: string): Promise<string> => {
+    const query = encodeURIComponent("name = 'GOOGLE AI Studio' and mimeType = 'application/vnd.google-apps.folder' and trashed = false");
+    const searchRes = await fetch(`https://www.googleapis.com/drive/v3/files?q=${query}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!searchRes.ok) {
+      throw new Error(`Google API folder lookup failed with status: ${searchRes.status}. Please make sure your token is active and valid.`);
+    }
+    const searchData = await searchRes.json();
+    const folder = searchData.files && searchData.files[0];
+    if (folder) {
+      return folder.id;
+    }
+
+    const metadata = {
+      name: 'GOOGLE AI Studio',
+      mimeType: 'application/vnd.google-apps.folder',
+    };
+    const createRes = await fetch('https://www.googleapis.com/drive/v3/files', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(metadata),
+    });
+    if (!createRes.ok) {
+      const errText = await createRes.text();
+      throw new Error(`Failed to create 'GOOGLE AI Studio' folder: ${errText || createRes.statusText}`);
+    }
+    const createdFolder = await createRes.json();
+    return createdFolder.id;
+  };
+
+  const handleGdriveBackup = async () => {
+    if (!googleAccessToken) {
+      triggerStatus('error', 'Authentication Required', 'Please enter a valid Google OAuth Access token under settings.');
+      return;
+    }
+    setIsGdriveSyncing(true);
+    triggerStatus('info', 'Cloud Sync Initiated', 'Contacting Google Drive storage servers...');
+    try {
+      const dbRes = await fetch('/api/admin/get-full-db');
+      if (!dbRes.ok) {
+        throw new Error(`Server returned HTTP ${dbRes.status} when pulling local database.`);
+      }
+      const dbData = await dbRes.json();
+      
+      triggerStatus('info', 'Accessing Application Folder', 'Locating or creating the isolated "GOOGLE AI Studio" workspace folder on Google Drive...');
+      const folderId = await getOrCreateAppFolder(googleAccessToken);
+
+      triggerStatus('info', 'Searching for Backup File', 'Checking for existing backup file inside "GOOGLE AI Studio" folder...');
+      // Look for any existing file inside the isolated folder
+      const fileQuery = encodeURIComponent(`name = 'jee_prep_db_dump.json' and '${folderId}' in parents and trashed = false`);
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${fileQuery}`,
+        {
+          headers: { Authorization: `Bearer ${googleAccessToken}` },
+        }
+      );
+      if (!searchRes.ok) {
+        throw new Error("Invalid or expired OAuth token when listing files on Google Drive.");
+      }
+      const searchData = await searchRes.json();
+      const existingFile = searchData.files && searchData.files[0];
+      
+      let url = 'https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+      let method = 'POST';
+      let uploadRes;
+
+      if (existingFile) {
+        triggerStatus('info', 'Replacing Cloud Backup', `Found active backup file (ID: ${existingFile.id}). Rewriting contents with ${dbData.questions?.length || 0} questions...`);
+        // Simple media replacement upload
+        url = `https://www.googleapis.com/upload/drive/v3/files/${existingFile.id}?uploadType=media`;
+        method = 'PATCH';
+        uploadRes = await fetch(url, {
+          method,
+          headers: {
+            Authorization: `Bearer ${googleAccessToken}`,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify(dbData),
+        });
+      } else {
+        triggerStatus('info', 'Creating Cloud Backup', `No active backup found. Preparing multipart payload containing ${dbData.questions?.length || 0} questions...`);
+        // Multipart upload for Metadata + Content body with parents parameter
+        const metadata = {
+          name: 'jee_prep_db_dump.json',
+          mimeType: 'application/json',
+          parents: [folderId],
+        };
+        const boundary = 'foo_bar_boundary';
+        const delimiter = `\r\n--${boundary}\r\n`;
+        const closeDelimiter = `\r\n--${boundary}--`;
+        
+        const multipartBody = 
+          delimiter +
+          'Content-Type: application/json; charset=UTF-8\r\n\r\n' +
+          JSON.stringify(metadata) +
+          delimiter +
+          'Content-Type: application/json\r\n\r\n' +
+          JSON.stringify(dbData) +
+          closeDelimiter;
+
+        uploadRes = await fetch(url, {
+          method,
+          headers: { 
+            Authorization: `Bearer ${googleAccessToken}`,
+            'Content-Type': `multipart/related; boundary=${boundary}`
+          },
+          body: multipartBody,
+        });
+      }
+      
+      if (uploadRes.ok) {
+        triggerStatus('success', '🎉 Cloud Sync Success!', `Perfect! Your database of ${dbData.questions?.length || 0} questions is now securely saved on your Google Drive inside the 'GOOGLE AI Studio' folder.`);
+        const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+        setLastSyncTime(timeStr);
+        localStorage.setItem("jee_last_sync_time", timeStr);
+      } else {
+        const errBody = await uploadRes.text();
+        throw new Error(errBody || "Failed to upload file to Google Drive");
+      }
+    } catch (err: any) {
+      console.error(err);
+      triggerStatus('error', 'Google Drive Sync Error', err.message || 'Communication failure with Google API.');
+    } finally {
+      setIsGdriveSyncing(false);
+    }
+  };
+
+  const handleGdriveRestore = async () => {
+    if (!googleAccessToken) {
+      triggerStatus('error', 'Authentication Required', 'Please enter a valid Google OAuth Access token first.');
+      return;
+    }
+    setIsGdriveSyncing(true);
+    triggerStatus('info', 'Connecting to Cloud Restore', 'Contacting Google Drive servers for active backup configurations...');
+    try {
+      triggerStatus('info', 'Accessing Application Folder', 'Locating the isolated "GOOGLE AI Studio" folder on Google Drive...');
+      const folderId = await getOrCreateAppFolder(googleAccessToken);
+
+      triggerStatus('info', 'Searching for Backup File', 'Checking for active backup inside "GOOGLE AI Studio" folder...');
+      const fileQuery = encodeURIComponent(`name = 'jee_prep_db_dump.json' and '${folderId}' in parents and trashed = false`);
+      const searchRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files?q=${fileQuery}`,
+        {
+          headers: { Authorization: `Bearer ${googleAccessToken}` },
+        }
+      );
+      if (!searchRes.ok) {
+        throw new Error("Invalid or expired OAuth token when checking files on Google Drive.");
+      }
+      const searchData = await searchRes.json();
+      const existingFile = searchData.files && searchData.files[0];
+      
+      if (!existingFile) {
+        triggerStatus('error', 'No Cloud Backup Found', 'There is no file named "jee_prep_db_dump.json" present inside your "GOOGLE AI Studio" folder yet.');
+        return;
+      }
+      
+      triggerStatus('info', 'Cloud Backup Located', 'Downloading active database payload from Google servers...');
+      // Download content
+      const downloadRes = await fetch(
+        `https://www.googleapis.com/drive/v3/files/${existingFile.id}?alt=media`,
+        {
+          headers: { Authorization: `Bearer ${googleAccessToken}` },
+        }
+      );
+      
+      if (downloadRes.ok) {
+        const backupData = await downloadRes.json();
+        if (backupData && Array.isArray(backupData.questions)) {
+          triggerStatus('info', 'Synchronizing with Database', `Parsing and restoring ${backupData.questions.length} questions...`);
+          const restoreRes = await fetch('/api/admin/restore-db', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(backupData),
+          });
+          const restoreData = await restoreRes.json();
+          if (restoreData.success) {
+            triggerStatus('success', '🎉 Cloud Restore Successful!', `Synchronized and loaded ${backupData.questions.length} questions, ${backupData.users.length} registered candidates, and ${backupData.attempts.length} historical attempt statistics to server!`);
+            // Seep into local storage
+            localStorage.setItem("jee_mains_full_db_backup", JSON.stringify(backupData));
+            const timeStr = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            setLastSyncTime(timeStr);
+            fetchTaxonomy();
+            fetchAdminQuestions();
+            fetchAdminLogs();
+          } else {
+            triggerStatus('error', 'Restore Handshake Failed', 'The local server database rejected the backup payload.');
+          }
+        } else {
+          triggerStatus('error', 'Invalid Schema', 'The downloaded cloud backup file does not match database layout.');
+        }
+      } else {
+        const errBody = await downloadRes.text();
+        throw new Error(errBody || "Failed to download backup file.");
+      }
+    } catch (err: any) {
+      console.error(err);
+      triggerStatus('error', 'Google Drive Restore Error', err.message || 'Unable to connect to Google Drive.');
+    } finally {
+      setIsGdriveSyncing(false);
+    }
+  };
+
+  // Load persistence configurations
+  useEffect(() => {
+    // 1. Check if we are inside a Google OAuth redirect/popup hash
+    const hash = window.location.hash;
+    if (hash) {
+      const params = new URLSearchParams(hash.substring(1));
+      const token = params.get('access_token');
+      if (token) {
+        setGoogleAccessToken(token);
+        localStorage.setItem('jee_google_access_token', token);
+        
+        // If we are inside an authorization popup window, notify the opener parent and close self!
+        if (window.opener) {
+          try {
+            window.opener.postMessage({ type: 'GOOGLE_OAUTH_TOKEN', token }, '*');
+            window.close();
+          } catch (e) {
+            console.error('Failed to communicate with opener window:', e);
+          }
+        }
+        
+        // Strip the hash from the parent URL to keep it pretty
+        window.history.replaceState({}, document.title, window.location.pathname + window.location.search);
+        triggerStatus('success', 'Google Drive Authorized!', 'Your credentials are now active, and synced to system.');
+      }
+    }
+
+    // 2. Listen to postMessage from the login popup if used
+    const handleGoogleMessage = (e: MessageEvent) => {
+      if (e.data && e.data.type === 'GOOGLE_OAUTH_TOKEN' && e.data.token) {
+        setGoogleAccessToken(e.data.token);
+        localStorage.setItem('jee_google_access_token', e.data.token);
+        triggerStatus('success', 'Authorized via Popup Callback!', 'Cloud session and GDrive credentials saved.');
+      }
+    };
+    window.addEventListener('message', handleGoogleMessage);
+
+    const savedUser = localStorage.getItem('jee_user');
+    if (savedUser) {
+      const parsed = JSON.parse(savedUser);
+      setCurrentUser(parsed);
+      setCurrentView('dashboard');
+      fetchUserHistory(parsed.id);
+    }
+    fetchTaxonomy();
+    initializeAndRestoreIfNeeded();
+
+    return () => {
+      window.removeEventListener('message', handleGoogleMessage);
+    };
+  }, []);
+
+  // Fetch all questions for active admin management board
+  const fetchAdminQuestions = async () => {
+    setLoadingAdminQuestions(true);
+    try {
+      const res = await fetch('/api/admin/questions');
+      const data = await res.json();
+      if (data.questions) {
+        setAdminQuestions(data.questions);
+      }
+    } catch (err) {
+      console.error('Error fetching admin questions:', err);
+    } finally {
+      setLoadingAdminQuestions(false);
+    }
+  };
+
+  const fetchAdminLogs = async () => {
+    setLoadingAdminTables(true);
+    try {
+      const uRes = await fetch('/api/admin/users');
+      const uData = await uRes.json();
+      if (uData.users) {
+        setAdminUsers(uData.users);
+      }
+      const aRes = await fetch('/api/admin/attempts');
+      const aData = await aRes.json();
+      if (aData.attempts) {
+        setAdminAttempts(aData.attempts);
+      }
+    } catch (err) {
+      console.error('Error fetching admin tables:', err);
+    } finally {
+      setLoadingAdminTables(false);
+    }
+  };
+
+  // Trigger admin questions and analytics lists sync when entering admin screen
+  useEffect(() => {
+    if (currentView === 'admin' && isAdmin) {
+      fetchAdminQuestions();
+      fetchAdminLogs();
+    }
+  }, [currentView, isAdmin]);
+
+  // Session Heartbeat effect (every 10 seconds to update active session duration)
+  useEffect(() => {
+    if (!currentUser) return;
+    
+    // Notify on login
+    fetch('/api/auth/heartbeat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userId: currentUser.id, activeSeconds: 2 }),
+    }).catch(err => console.warn('Heartbeat sync skipped (server may be starting up):', err));
+
+    const interval = setInterval(() => {
+      fetch('/api/auth/heartbeat', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userId: currentUser.id, activeSeconds: 10 }),
+      }).catch(err => console.warn('Heartbeat sync skipped (server may be starting up):', err));
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, [currentUser]);
+
+  // Fetch taxonomy and questions inventory sizes
+  const fetchTaxonomy = async () => {
+    try {
+      const res = await fetch('/api/db/taxonomy');
+      const data = await res.json();
+      if (data.taxonomy) {
+        setTaxonomy(data.taxonomy);
+      }
+    } catch (err) {
+      console.error('Error fetching taxonomy:', err);
+    }
+  };
+
+  // Fetch attempts history
+  const fetchUserHistory = async (userId: number) => {
+    setLoadingHistory(true);
+    try {
+      const res = await fetch(`/api/db/history/${userId}`);
+      const data = await res.json();
+      if (data.attempts) {
+        setTestHistory(data.attempts);
+      }
+    } catch (err) {
+      console.error('Error fetching history:', err);
+    } finally {
+      setLoadingHistory(false);
+    }
+  };
+
+  // User Sign-In Action
+  const handleLoginSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!loginForm.username || !loginForm.email_id || !loginForm.mobile_number || !loginForm.dob) {
+      alert('Please fill in Name, Mobile, Email, and Date of Birth to construct your JEE Exam candidate identity.');
+      return;
+    }
+    try {
+      const res = await fetch('/api/auth/register', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(loginForm),
+      });
+      const data = await res.json();
+      if (data.user) {
+        setCurrentUser(data.user);
+        localStorage.setItem('jee_user', JSON.stringify(data.user));
+        setCurrentView('dashboard');
+        fetchUserHistory(data.user.id);
+      } else {
+        alert(data.error || 'Login session collapsed.');
+      }
+    } catch (err) {
+      console.error('Sign-in error:', err);
+      alert('Network configuration error.');
+    }
+  };
+
+  // Trigger test creation
+  const handleCreateTest = async (forceOptions: { forceGenerate?: boolean; proportionalScale?: boolean } = {}) => {
+    if (!currentUser || selectedChapters.length === 0) return;
+
+    try {
+      const res = await fetch('/api/test/generate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          userId: currentUser.id,
+          selectedChapters,
+          ...forceOptions
+        }),
+      });
+      const data = await res.json();
+
+      if (data.warning) {
+        // Display choices dialogue to handle narrow syllabus
+        setWarningData(data);
+        return;
+      }
+
+      if (data.attempt && data.questions) {
+        // Setup quiz state parameters
+        setActiveAttempt(data.attempt);
+        setExamQuestions(data.questions);
+        setWarningData(null);
+        setShowNewTestWizard(false);
+        setCurrentQuestionIndex(0);
+        setSelectedSubject('PHYSICS');
+        
+        // Dynamic timing configuration (180 mins or scaled proportionately)
+        const allowedTimeSecs = (data.allowedTimeMinutes || 180) * 60;
+        setQuizTimer(allowedTimeSecs);
+
+        // Pre-initialize answer matrices
+        const answersSeed: typeof userAnswers = {};
+        data.questions.forEach((q: Question) => {
+          answersSeed[q.id] = {
+            selected_answer: null,
+            time_spent_seconds: 0,
+            palette_status: 'NOT_VISITED',
+          };
+        });
+        // First question is initialized as Opened/NOT_ANSWERED
+        if (data.questions[0]) {
+          answersSeed[data.questions[0].id].palette_status = 'NOT_ANSWERED';
+        }
+
+        setUserAnswers(answersSeed);
+        setCurrentView('exam');
+        questionStartTimeRef.current = Date.now();
+
+        // Start countdown loop
+        if (timerRef.current) clearInterval(timerRef.current);
+        timerRef.current = setInterval(() => {
+          setQuizTimer((prev) => {
+            if (prev <= 1) {
+              clearInterval(timerRef.current!);
+              handleSubmitExam(answersSeed, data.attempt.id);
+              return 0;
+            }
+            return prev - 1;
+          });
+        }, 1000);
+      } else {
+        alert(data.error || 'Failed to assemble exam.');
+      }
+    } catch (err) {
+      console.error('Exam generator error:', err);
+      alert('Internal generator failure.');
+    }
+  };
+
+  // Switch questions inside NTA controller
+  const navigateToQuestion = (targetIndex: number) => {
+    // Record spent time on previous question
+    const timeSpent = Math.round((Date.now() - questionStartTimeRef.current) / 1000);
+    const activeQ = examQuestions[currentQuestionIndex];
+    
+    setUserAnswers((prev) => {
+      const updated = { ...prev };
+      if (updated[activeQ.id]) {
+        updated[activeQ.id].time_spent_seconds += timeSpent;
+        // If question was never touched, update state to Not Answered (standard NTA)
+        if (updated[activeQ.id].palette_status === 'NOT_VISITED') {
+          updated[activeQ.id].palette_status = 'NOT_ANSWERED';
+        }
+      }
+
+      // Mark target question as Visited (NOT_ANSWERED) if it was NOT_VISITED
+      const nextQ = examQuestions[targetIndex];
+      if (nextQ && updated[nextQ.id] && updated[nextQ.id].palette_status === 'NOT_VISITED') {
+        updated[nextQ.id].palette_status = 'NOT_ANSWERED';
+      }
+
+      return updated;
+    });
+
+    setCurrentQuestionIndex(targetIndex);
+    setSelectedSubject(examQuestions[targetIndex].subject);
+    questionStartTimeRef.current = Date.now();
+  };
+
+  // MCQ answer selection
+  const handleSelectOption = (option: string) => {
+    const activeQ = examQuestions[currentQuestionIndex];
+    setUserAnswers((prev) => {
+      const updated = { ...prev };
+      updated[activeQ.id].selected_answer = option;
+      return updated;
+    });
+  };
+
+  // NVQ keyboard interaction
+  const handleNumericInput = (val: string) => {
+    const activeQ = examQuestions[currentQuestionIndex];
+    setUserAnswers((prev) => {
+      const updated = { ...prev };
+      const currentVal = updated[activeQ.id].selected_answer || '';
+      
+      if (val === 'CLEAR') {
+        updated[activeQ.id].selected_answer = '';
+      } else if (val === 'BACKSPACE') {
+        updated[activeQ.id].selected_answer = currentVal.slice(0, -1);
+      } else if (val === '-') {
+        // Negation toggle
+        if (currentVal.startsWith('-')) {
+          updated[activeQ.id].selected_answer = currentVal.slice(1);
+        } else {
+          updated[activeQ.id].selected_answer = '-' + currentVal;
+        }
+      } else if (val === '.') {
+        if (!currentVal.includes('.')) {
+          updated[activeQ.id].selected_answer = currentVal + '.';
+        }
+      } else {
+        // Max standard length constraint
+        if (currentVal.length < 8) {
+          updated[activeQ.id].selected_answer = currentVal + val;
+        }
+      }
+      return updated;
+    });
+  };
+
+  // Clear answer
+  const handleClearResponse = () => {
+    const activeQ = examQuestions[currentQuestionIndex];
+    setUserAnswers((prev) => {
+      const updated = { ...prev };
+      updated[activeQ.id].selected_answer = null;
+      updated[activeQ.id].palette_status = 'NOT_ANSWERED';
+      return updated;
+    });
+  };
+
+  // Save and Next Action
+  const handleSaveAndNext = () => {
+    const activeQ = examQuestions[currentQuestionIndex];
+    const userAns = userAnswers[activeQ.id]?.selected_answer;
+    
+    setUserAnswers((prev) => {
+      const updated = { ...prev };
+      if (userAns !== null && userAns !== undefined && userAns !== '') {
+        updated[activeQ.id].palette_status = 'ANSWERED';
+      } else {
+        updated[activeQ.id].palette_status = 'NOT_ANSWERED';
+      }
+      return updated;
+    });
+
+    if (currentQuestionIndex < examQuestions.length - 1) {
+      navigateToQuestion(currentQuestionIndex + 1);
+    }
+  };
+
+  // Mark for Review & Next Action
+  const handleMarkForReviewAndNext = () => {
+    const activeQ = examQuestions[currentQuestionIndex];
+    const userAns = userAnswers[activeQ.id]?.selected_answer;
+
+    setUserAnswers((prev) => {
+      const updated = { ...prev };
+      if (userAns !== null && userAns !== undefined && userAns !== '') {
+        updated[activeQ.id].palette_status = 'ANSWERED_MARKED_FOR_REVIEW';
+      } else {
+        updated[activeQ.id].palette_status = 'MARKED_FOR_REVIEW';
+      }
+      return updated;
+    });
+
+    if (currentQuestionIndex < examQuestions.length - 1) {
+      navigateToQuestion(currentQuestionIndex + 1);
+    }
+  };
+
+  // Submit assessment
+  const handleSubmitExam = async (overrideAnswers?: typeof userAnswers, overrideAttemptId?: number) => {
+    const targetAttemptId = overrideAttemptId || activeAttempt?.id;
+    const targetAnswers = overrideAnswers || userAnswers;
+
+    if (!targetAttemptId) return;
+
+    // Clear timer thread
+    if (timerRef.current) {
+      clearInterval(timerRef.current);
+      timerRef.current = null;
+    }
+
+    // Add final pending question time
+    const finalSpent = Math.round((Date.now() - questionStartTimeRef.current) / 1000);
+    const activeQ = examQuestions[currentQuestionIndex];
+    
+    const finalAnswersMapped = { ...targetAnswers };
+    if (activeQ && finalAnswersMapped[activeQ.id]) {
+      finalAnswersMapped[activeQ.id].time_spent_seconds += finalSpent;
+    }
+
+    try {
+      const res = await fetch('/api/test/submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          attemptId: targetAttemptId,
+          responses: finalAnswersMapped,
+          timeTakenSeconds: Math.max(1, 10800 - quizTimer),
+        }),
+      });
+      const data = await res.json();
+      if (data.success && data.result) {
+        setSelectedResultAttempt(data.result);
+        setCurrentView('result');
+        // Fetch original question coordinates for reviewing
+        setReviewActiveQuestionIndex(0);
+        setReviewActiveSubject('PHYSICS');
+        if (currentUser) fetchUserHistory(currentUser.id);
+      } else {
+        alert('Assessment evaluation failed.');
+      }
+    } catch (err) {
+      console.error('Submit error:', err);
+      alert('Could not submit answers.');
+    }
+  };
+
+  // Convert File object to Base64 in Browser (free of charge)
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, type: 'q' | 'sol') => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      const result = reader.result as string;
+      if (type === 'q') {
+        setQuestionPdfUrl(URL.createObjectURL(file));
+        setQuestionPdfBase64(result);
+      } else {
+        setSolutionPdfUrl(URL.createObjectURL(file));
+        setSolutionPdfBase64(result);
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Launch AI ETL parser inside admin board
+  const handleLaunchParser = async () => {
+    if (!questionPdfBase64 || !solutionPdfBase64) {
+      alert('Please upload both the Question PDF and Solutions PDF.');
+      return;
+    }
+
+    setIsParsing(true);
+    setParsingLogs([
+      'Initialized ETL Parser thread...',
+      'Scanning for all subjects (PHYSICS, CHEMISTRY, MATHEMATICS)...',
+      'Reading base64 byte streams...',
+      'Compressing inputs for API package upload...',
+      'Sending multi-subject payload to server-side Gemini 3.5 Flash Model...',
+      'Detecting and parsing custom text boundaries per subject map...',
+      'Interpreting formulas and scientific tagging taxonomy...'
+    ]);
+
+    // Interval to simulate parser logs
+    const logInterval = setInterval(() => {
+      const mockLogs = [
+        'Running multi-modal PDF segmentation...',
+        'Matching question indices 1-to-1 with explanation files...',
+        'Compiling LaTeX structures...',
+        'Analyzing subject classification for candidate questions...',
+        'Running database inserts with automatic chapter and topic tagging...'
+      ];
+      const randomLog = mockLogs[Math.floor(Math.random() * mockLogs.length)];
+      setParsingLogs((prev) => [...prev, randomLog]);
+    }, 2500);
+
+    try {
+      const res = await fetch('/api/admin/parse', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          questionPdfBase64,
+          solutionPdfBase64,
+        }),
+      });
+      clearInterval(logInterval);
+      const data = await res.json();
+      
+      if (data.success) {
+        setParsedQuestionsCount(data.countCount);
+        setParsingLogs((prev) => [
+          ...prev,
+          `SUCCESS: Database synced! Added ${data.countCount} new questions.`,
+          'Updating master library records dynamically per subject and chapter...',
+          'ETL cycle completed cleanly!'
+        ]);
+        fetchTaxonomy();
+        fetchAdminQuestions();
+      } else {
+        const errorMsg = data.error || 'AI parsing timed out.';
+        let troubleshootingTip = '';
+        if (
+          errorMsg.includes('429') || 
+          errorMsg.includes('RESOURCE_EXHAUSTED') || 
+          errorMsg.includes('quota') || 
+          errorMsg.includes('Quota exceeded')
+        ) {
+          troubleshootingTip = '💡 [RATE LIMIT DETECTED] The free tier Gemini API allows up to 20 requests per minute or contains strict token limit quotas. To proceed smoothly: (1) Wait 20-30 seconds and retry, (2) upload smaller documents with fewer questions to minimize token consumption, or (3) configure a custom paid Gemini API Key within the Settings menu.';
+        }
+        setParsingLogs((prev) => [
+          ...prev, 
+          `ERROR: ${errorMsg}`,
+          ...(troubleshootingTip ? [troubleshootingTip] : [])
+        ]);
+      }
+    } catch (err: any) {
+      clearInterval(logInterval);
+      const errMsg = err.message || 'Verification failed.';
+      let troubleshootingTip = '';
+      if (
+        errMsg.includes('429') || 
+        errMsg.includes('RESOURCE_EXHAUSTED') || 
+        errMsg.includes('quota')
+      ) {
+        troubleshootingTip = '💡 [RATE LIMIT] Gemini API free tier request limits. Please wait 20-30 seconds and retry, or configure a paid API Key.';
+      }
+      setParsingLogs((prev) => [
+        ...prev, 
+        `SYSTEM ERROR: ${errMsg}`,
+        ...(troubleshootingTip ? [troubleshootingTip] : [])
+      ]);
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  // Delete administrative question
+  const handleDeleteQuestion = async (id: number) => {
+    if (!confirm('Are you sure you want to delete this question? This action cannot be undone.')) {
+      return;
+    }
+    try {
+      const res = await fetch(`/api/admin/questions/${id}`, {
+        method: 'DELETE',
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setAdminQuestions(prev => prev.filter(q => q.id !== id));
+        fetchTaxonomy();
+      } else {
+        alert('Error: ' + (data.error || 'Failed to delete question'));
+      }
+    } catch (err) {
+      console.error('Error deleting question:', err);
+      alert('Network error while deleting question.');
+    }
+  };
+
+  // Administrative clear database
+  const handleClearQuestions = async (mode: 'last_batch' | 'all') => {
+    try {
+      const res = await fetch('/api/admin/clear-questions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mode }),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        fetchTaxonomy();
+        fetchAdminQuestions();
+        fetchAdminLogs();
+        setParsedQuestionsCount(0);
+        setWipeStatusMessage(`success: ${data.message}`);
+        setTimeout(() => setWipeStatusMessage(null), 8000);
+      } else {
+        setWipeStatusMessage('error: Error clearing questions: ' + (data.error || 'Failed to complete'));
+        setTimeout(() => setWipeStatusMessage(null), 8000);
+      }
+    } catch (err) {
+      console.error('Error clearing questions:', err);
+      setWipeStatusMessage('error: Network error while resetting database.');
+      setTimeout(() => setWipeStatusMessage(null), 8500);
+    }
+    setWipeState('idle');
+  };
+
+  // Update administrative question & tags
+  const handleUpdateQuestion = async (updatedQ: Question) => {
+    setAdminSavingId(updatedQ.id);
+    try {
+      const res = await fetch(`/api/admin/questions/${updatedQ.id}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updatedQ),
+      });
+      const data = await res.json();
+      if (data.status === 'success') {
+        setAdminQuestions(prev => 
+          prev.map(q => q.id === updatedQ.id ? data.question : q)
+        );
+        setAdminEditingQuestion(null);
+        fetchTaxonomy();
+      } else {
+        alert('Error: ' + (data.error || 'Failed to update question'));
+      }
+    } catch (err) {
+      console.error('Error updating question:', err);
+      alert('Network error while updating question.');
+    } finally {
+      setAdminSavingId(null);
+    }
+  };
+
+  // Total questions classified
+  const totalLibraryQuestions = taxonomy.reduce((acc, curr) => acc + curr.question_count, 0);
+
+  // Subject question groupings for Active Exam
+  const physicsExamQuestions = examQuestions.filter(q => q.subject === 'PHYSICS');
+  const chemistryExamQuestions = examQuestions.filter(q => q.subject === 'CHEMISTRY');
+  const mathExamQuestions = examQuestions.filter(q => q.subject === 'MATHEMATICS');
+
+  const getSubQuestionsCountOfPalette = (sub: 'PHYSICS' | 'CHEMISTRY' | 'MATHEMATICS') => {
+    const list = examQuestions.filter(q => q.subject === sub);
+    const stats = { grey: 0, red: 0, green: 0, purple: 0, purpleDot: 0 };
+    list.forEach(q => {
+      const state = userAnswers[q.id]?.palette_status || 'NOT_VISITED';
+      if (state === 'NOT_VISITED') stats.grey++;
+      else if (state === 'NOT_ANSWERED') stats.red++;
+      else if (state === 'ANSWERED') stats.green++;
+      else if (state === 'MARKED_FOR_REVIEW') stats.purple++;
+      else if (state === 'ANSWERED_MARKED_FOR_REVIEW') stats.purpleDot++;
+    });
+    return stats;
+  };
+
+  const currentSubjectQuizList = examQuestions.filter(q => q.subject === selectedSubject);
+  const currentSubjectIndexInPalette = currentSubjectQuizList.findIndex(q => q.id === examQuestions[currentQuestionIndex]?.id);
+
+  // Clear session logout
+  const handleLogout = () => {
+    localStorage.removeItem('jee_user');
+    setCurrentUser(null);
+    setCurrentView('landing');
+  };
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans text-slate-800 relative">
+      <AnimatePresence>
+        {showInactivityAlert && (
+          <motion.div 
+            initial={{ opacity: 0, y: -40, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95, y: -20 }}
+            transition={{ type: 'spring', stiffness: 350, damping: 25 }}
+            className="fixed top-6 right-6 z-[9999] bg-amber-50 border border-amber-300 text-amber-950 rounded-xl p-4 shadow-xl flex items-start gap-3 max-w-sm"
+          >
+            <AlertTriangle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5 animate-bounce" />
+            <div className="flex-1">
+              <span className="text-xs font-extrabold uppercase tracking-widest block text-amber-950">Session Auto-Logout</span>
+              <span className="text-[11px] text-amber-950 leading-relaxed block mt-1 font-medium">
+                You have been logged out due to 30 minutes of inactivity. Don't worry, your data and active sessions have been securely saved.
+              </span>
+            </div>
+            <button 
+              onClick={() => setShowInactivityAlert(false)} 
+              className="text-amber-500 hover:text-amber-800 text-xs font-black leading-none cursor-pointer p-0.5"
+            >
+              ✕
+            </button>
+          </motion.div>
+        )}
+
+        {showInactivityWarning && (
+          <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-xs z-[9999] flex items-center justify-center p-4">
+            <motion.div 
+              initial={{ scale: 0.9, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.9, opacity: 0 }}
+              className="bg-white border-2 border-amber-400 rounded-2xl shadow-2xl p-6 max-w-sm w-full text-center relative overflow-hidden"
+            >
+              <div className="absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-amber-400 via-red-500 to-amber-400 animate-pulse" />
+              
+              <div className="mx-auto bg-amber-50 w-11 h-11 rounded-full flex items-center justify-center mb-3.5 border border-amber-200">
+                <Clock className="w-5 h-5 text-amber-600" />
+              </div>
+
+              <h3 className="text-xs font-black text-slate-800 uppercase tracking-wider mb-1.5">
+                Inactivity Warning
+              </h3>
+              
+              <p className="text-[11px] text-slate-600 leading-relaxed mb-5 font-medium">
+                You have been inactive for <span className="text-slate-900 font-extrabold">29 minutes</span>. Your session will cleanly auto-logout in:
+              </p>
+
+              <div className="bg-slate-50 border border-slate-150 rounded-xl p-3 mb-5 font-mono">
+                <span className="text-[9px] text-slate-400 font-extrabold uppercase block mb-0.5">Time Remaining</span>
+                <span className="text-2xl font-black text-rose-600 select-none tracking-widest">
+                  00:{warningCountdown < 10 ? `0${warningCountdown}` : warningCountdown}
+                </span>
+                <div className="w-full bg-slate-200 h-1 rounded-full overflow-hidden mt-2.5 max-w-[160px] mx-auto">
+                  <motion.div 
+                    initial={{ width: '100%' }}
+                    animate={{ width: `${(warningCountdown / 60) * 100}%` }}
+                    transition={{ ease: 'linear', duration: 1 }}
+                    className="bg-rose-500 h-full"
+                  />
+                </div>
+              </div>
+
+              <div className="flex flex-col gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setShowInactivityWarning(false);
+                  }}
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-[11px] uppercase tracking-wider py-2.5 rounded-lg transition-all shadow-sm active:scale-98 cursor-pointer"
+                >
+                  Stay Connected & Active
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    localStorage.removeItem('jee_user');
+                    setCurrentUser(null);
+                    setCurrentView('landing');
+                    setShowInactivityWarning(false);
+                    setShowInactivityAlert(true);
+                    setTimeout(() => setShowInactivityAlert(false), 9500);
+                  }}
+                  className="w-full bg-slate-100 hover:bg-slate-200 text-slate-500 hover:text-slate-700 font-bold text-[10px] uppercase tracking-wider py-1.5 rounded-md transition-all cursor-pointer"
+                >
+                  Log Out Now
+                </button>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Top Ministry bar replicates real NTA styling */}
+      <header className="border-b border-slate-200 bg-white shadow-sm">
+        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-2 sm:px-6">
+          <div className="flex items-center gap-3">
+            <div className="h-10 w-10 bg-indigo-600 rounded flex items-center justify-center text-white font-black text-xs tracking-wider">
+              JEE
+            </div>
+            <div>
+              <h1 className="text-sm font-bold tracking-tight text-indigo-900 sm:text-base">
+                JEE Mains Test Prep
+              </h1>
+              <p className="text-xs font-medium text-slate-500">
+                Complete Exam Preparation & Simulated Assessment
+              </p>
+            </div>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className="hidden bg-emerald-50 text-emerald-700 px-2.5 py-1 text-xs font-semibold rounded-full border border-emerald-100 sm:inline-flex items-center gap-1.5">
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse"></span>
+              JEE Mains Test Prep 2026
+            </span>
+            {currentUser && (
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setCurrentView('dashboard')}
+                  className="text-xs font-semibold text-slate-600 hover:text-blue-600 px-2 py-1 rounded"
+                >
+                  Dashboard
+                </button>
+                {isAdmin && (
+                  <button
+                    onClick={() => setCurrentView('admin')}
+                    className="text-xs font-semibold text-slate-600 hover:text-blue-600 px-2 py-1 rounded flex items-center gap-1 bg-yellow-50 text-yellow-800 border border-yellow-100"
+                  >
+                    <Shield className="w-3 h-3" /> Admin ETL
+                  </button>
+                )}
+                <button
+                  onClick={handleLogout}
+                  className="text-xs font-semibold text-rose-600 hover:bg-rose-50 px-2.5 py-1.5 rounded-md border border-rose-100"
+                >
+                  Logout
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      </header>
+
+      {/* Main View Transition Container */}
+      <main className="mx-auto max-w-7xl p-4 sm:p-6 transition-all duration-300">
+        <AnimatePresence mode="wait">
+          {currentView === 'landing' && (
+            <motion.div
+              key="landing"
+              initial={{ opacity: 0, y: 15 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: -15 }}
+              className="max-w-2xl mx-auto mt-8 bg-white rounded-xl border border-slate-200 shadow-lg overflow-hidden"
+            >
+              <div className="bg-gradient-to-r from-indigo-900 to-slate-900 px-6 py-8 text-white text-center">
+                <Sparkles className="w-12 h-12 mx-auto text-amber-400 mb-2 animate-bounce" />
+                <h2 className="text-2xl font-black tracking-tight sm:text-3xl">
+                  JEE MAINS TEST PREP
+                </h2>
+                <p className="text-indigo-200 text-sm mt-1 scale-95 uppercase font-semibold tracking-wider">
+                  Complete Exam Preparation & Simulated Assessment
+                </p>
+              </div>
+
+              <form onSubmit={handleLoginSubmit} className="p-6 space-y-5">
+                <h3 className="text-lg font-bold text-slate-800 border-b border-slate-100 pb-2 flex items-center gap-2">
+                  <User className="text-blue-600 w-5 h-5" /> Candidate Registry Sign-In
+                </h3>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Full Candidate Name
+                    </label>
+                    <div className="relative">
+                      <User className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <input
+                        type="text"
+                        required
+                        placeholder="e.g. Shrikant Bhv"
+                        value={loginForm.username}
+                        onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Mobile Number
+                    </label>
+                    <div className="relative">
+                      <Phone className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <input
+                        type="tel"
+                        required
+                        placeholder="e.g. +91 9876543210"
+                        value={loginForm.mobile_number}
+                        onChange={(e) => setLoginForm({ ...loginForm, mobile_number: e.target.value })}
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                      Candidate Email ID
+                    </label>
+                    <div className="relative">
+                      <Mail className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                      <input
+                        type="email"
+                        required
+                        placeholder="e.g. bhvshrikant@gmail.com"
+                        value={loginForm.email_id}
+                        onChange={(e) => setLoginForm({ ...loginForm, email_id: e.target.value })}
+                        className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                        Date of Birth (DOB)
+                      </label>
+                      <div className="relative">
+                        <Calendar className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                        <input
+                          type="date"
+                          required
+                          value={loginForm.dob}
+                          onChange={(e) => setLoginForm({ ...loginForm, dob: e.target.value })}
+                          className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm"
+                        />
+                      </div>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 uppercase tracking-wider mb-1">
+                        Bypass PIN / Password
+                      </label>
+                      <div className="relative">
+                        <Settings className="absolute left-3 top-3 w-4 h-4 text-slate-400" />
+                        <input
+                          type="password"
+                          placeholder="e.g. 123456"
+                          value={loginForm.password}
+                          onChange={(e) => setLoginForm({ ...loginForm, password: e.target.value })}
+                          className="w-full pl-10 pr-4 py-2.5 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500 focus:bg-white text-sm"
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="bg-amber-50 rounded-lg border border-amber-100 p-4 text-xs text-amber-800 space-y-1 leading-relaxed">
+                  <span className="font-extrabold block">⚠️ Candidate Advisory Notice:</span>
+                  <p>
+                    Please use real candidate indicators. This application simulates the full 3-hour marking console of the NTA. All response records are logged in our persistent relational repository.
+                  </p>
+                </div>
+
+                <button
+                  type="submit"
+                  className="w-full bg-blue-600 hover:bg-blue-700 text-white font-extrabold uppercase py-3 rounded-lg flex items-center justify-center gap-2 shadow-md transition-colors group"
+                >
+                  Sign In & Launch Dashboard <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
+                </button>
+              </form>
+            </motion.div>
+          )}
+
+          {currentView === 'dashboard' && currentUser && (
+            <motion.div
+              key="dashboard"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-6"
+            >
+              {/* Candidate Info card */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
+                <div>
+                  <h2 className="text-xl font-extrabold text-slate-800 flex items-center gap-2 flex-wrap">
+                    Welcome back, {currentUser.username}!
+                    {isAdmin ? (
+                      <span className="bg-amber-100 text-amber-800 text-[10px] tracking-wider uppercase font-extrabold px-2 py-0.5 rounded-full border border-amber-200">Creator Admin</span>
+                    ) : (
+                      <span className="bg-blue-50 text-blue-800 text-[10px] tracking-wider uppercase font-extrabold px-2 py-0.5 rounded-full border border-blue-200">Candidate View</span>
+                    )}
+                  </h2>
+                  <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs font-semibold text-slate-500 items-center">
+                    <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5 text-slate-400" /> {currentUser.email_id}</span>
+                    <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-slate-400" /> {currentUser.mobile_number}</span>
+                    {currentUser.candidate_id && (
+                      <span className="flex items-center gap-1 bg-indigo-50 text-indigo-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-indigo-100 uppercase tracking-wider">
+                        Candidate ID: {currentUser.candidate_id}
+                      </span>
+                    )}
+                    {currentUser.dob && (
+                      <span className="flex items-center gap-1 bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
+                        DOB: {currentUser.dob}
+                      </span>
+                    )}
+                  </div>
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    onClick={() => {
+                      setSelectedChapters([]);
+                      setWarningData(null);
+                      setShowNewTestWizard(true);
+                    }}
+                    className="bg-blue-600 hover:bg-blue-700 text-white font-extrabold text-sm px-5 py-2.5 rounded-lg shadow-sm flex items-center gap-2 uppercase tracking-wide transition-colors"
+                  >
+                    <Plus className="w-4 h-4" /> Assemble New Exam
+                  </button>
+                  {isAdmin && (
+                    <button
+                      onClick={() => setCurrentView('admin')}
+                      className="border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 font-extrabold text-sm px-4 py-2.5 rounded-lg flex items-center gap-2 uppercase tracking-wide transition-colors"
+                    >
+                      <Upload className="w-4 h-4 text-slate-500" /> PDF AI ETL Parser
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {/* Statistics & Taxonomy side-by-side */}
+              <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+                
+                {/* Taxonomy Tracker Panel (Highlighted Visibly as Requested) */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm lg:col-span-1 flex flex-col">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                    <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
+                      <Layers className="text-indigo-600 w-5 h-5" /> Official JEE Syllabus Tracker
+                    </h3>
+                    <span className="bg-indigo-50 text-indigo-700 text-xxs font-extrabold px-2 py-0.5 rounded border border-indigo-100 uppercase tracking-wider">
+                      Taxonomy
+                    </span>
+                  </div>
+
+                  <p className="text-slate-500 text-xs mb-4 leading-relaxed">
+                    Highlighted below are the core syllabus components as categorized in the JEE 2026 guidelines. Check mapped questions parsed in your library.
+                  </p>
+
+                  <div className="flex-1 overflow-y-auto space-y-4 max-h-[420px] pr-1 scrollbar-thin">
+                    {(['PHYSICS', 'CHEMISTRY', 'MATHEMATICS'] as const).map((sub) => {
+                      const list = taxonomy.filter(item => item.subject === sub);
+                      const subQuestionsTotal = list.reduce((sum, item) => sum + item.question_count, 0);
+                      const subColor = sub === 'PHYSICS' ? 'blue' : sub === 'CHEMISTRY' ? 'emerald' : 'violet';
+                      
+                      return (
+                        <div key={sub} className="space-y-2">
+                          <div className={`p-2 bg-${subColor}-50/50 rounded-lg flex items-center justify-between border border-${subColor}-100`}>
+                            <span className="text-xs font-extrabold uppercase tracking-wide text-slate-700">
+                              {sub}
+                            </span>
+                            <span className="text-xs bg-slate-100 text-slate-800 font-bold px-2 py-0.5 rounded-md">
+                              {subQuestionsTotal} questions
+                            </span>
+                          </div>
+                          
+                          <div className="pl-2 space-y-1 border-l-2 border-slate-100">
+                            {list.map((ch) => (
+                              <div key={ch.id} className="flex justify-between items-center text-xs py-1 hover:bg-slate-50 rounded pl-1.5 transition-colors">
+                                <span className="text-slate-600 truncate max-w-[190px]">
+                                  U{ch.unit}: {ch.chapter}
+                                </span>
+                                <span className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded ${ch.question_count > 0 ? 'bg-indigo-100 text-indigo-800' : 'bg-slate-100 text-slate-400'}`}>
+                                  {ch.question_count}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="border-t border-slate-100 pt-3 mt-4 flex items-center justify-between text-xs text-slate-500">
+                    <span>Total parsed questions:</span>
+                    <span className="font-extrabold text-slate-800">{totalLibraryQuestions}</span>
+                  </div>
+                </div>
+
+                {/* Performance History / Past Exams panel */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm lg:col-span-2 flex flex-col">
+                  <div className="flex items-center justify-between border-b border-slate-100 pb-3 mb-4">
+                    <h3 className="font-extrabold text-slate-800 flex items-center gap-2">
+                      <BarChart2 className="text-blue-600 w-5 h-5" /> Attempted Test History & Analytics
+                    </h3>
+                    <span className="bg-blue-50 text-blue-700 text-xxs font-extrabold px-2 py-0.5 rounded border border-blue-100 uppercase tracking-wider">
+                      Analytics DB
+                    </span>
+                  </div>
+
+                  {loadingHistory ? (
+                    <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-2">
+                      <div className="w-8 h-8 rounded-full border-4 border-slate-100 border-t-blue-600 animate-spin"></div>
+                      <p className="text-xs text-slate-400">Loading mock metrics...</p>
+                    </div>
+                  ) : testHistory.length === 0 ? (
+                    <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-100 rounded-xl bg-slate-50">
+                      <div className="h-12 w-12 rounded-full bg-blue-50 text-blue-500 flex items-center justify-center mb-3">
+                        <FileText className="w-6 h-6" />
+                      </div>
+                      <h4 className="text-sm font-bold text-slate-700">No test attempts logged</h4>
+                      <p className="text-xs text-slate-400 max-w-sm mt-1">
+                        Use the "Assemble New Exam" pipeline to launch standard NTA simulated exams dynamically.
+                      </p>
+                    </div>
+                  ) : (
+                    <div className="flex-1 space-y-6">
+                      {/* Metric widgets */}
+                      <div className="grid grid-cols-3 gap-3">
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Tests Done</span>
+                          <span className="text-lg font-black text-slate-800">{testHistory.length}</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Avg Score</span>
+                          <span className="text-lg font-black text-slate-800">
+                            {Math.round(testHistory.reduce((acc, curr) => acc + curr.total_score, 0) / testHistory.length)}
+                          </span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block">Peak Percentile</span>
+                          <span className="text-xxs font-black text-blue-600 block mt-1 leading-tight font-mono">
+                            {formatPercentileRange(Math.max(...testHistory.map(h => Math.max(h.percentile_jan, h.percentile_april))))}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Attempts list */}
+                      <div className="space-y-3 max-h-[300px] overflow-y-auto pr-1">
+                        {testHistory.map((attempt) => (
+                          <div
+                            key={attempt.id}
+                            className="p-3 border border-slate-200 rounded-lg hover:border-blue-300 transition-colors bg-white hover:shadow-sm flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3"
+                          >
+                            <div className="space-y-1">
+                              <span className="text-[10px] font-extrabold uppercase bg-slate-100 text-slate-700 px-2 py-0.5 rounded border border-slate-100">
+                                Exam #{attempt.id} ({attempt.test_total_questions} Questions)
+                              </span>
+                              <div className="text-xs text-slate-500 font-semibold flex items-center gap-2">
+                                <Calendar className="w-3 h-3" /> {new Date(attempt.attempted_at).toLocaleDateString()} at {new Date(attempt.attempted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                              </div>
+                              <p className="text-xxs text-slate-400 truncate max-w-sm">
+                                Syllabus chapters: {attempt.syllabus_chapters.join(', ')}
+                              </p>
+                            </div>
+
+                            <div className="flex items-center gap-4 w-full sm:w-auto justify-between sm:justify-end border-t sm:border-t-0 pt-2 sm:pt-0">
+                              <div className="text-right">
+                                <div className="text-sm font-extrabold text-slate-800">
+                                  {attempt.total_score} marks
+                                </div>
+                                <div className="text-xxs font-mono font-bold space-y-0.5 mt-0.5">
+                                  <div className="text-indigo-600">Jan: {formatPercentileRange(attempt.percentile_jan)}</div>
+                                  <div className="text-emerald-600">April: {formatPercentileRange(attempt.percentile_april)}</div>
+                                </div>
+                              </div>
+
+                              <button
+                                onClick={() => {
+                                  // Pull actual question list matching syllabus chapters for review
+                                  fetch(`/api/test/generate`, {
+                                    method: 'POST',
+                                    headers: { 'Content-Type': 'application/json' },
+                                    body: JSON.stringify({ userId: currentUser.id, selectedChapters: attempt.syllabus_chapters, forceGenerate: true })
+                                  })
+                                    .then(res => res.json())
+                                    .then(data => {
+                                      if (data.questions) {
+                                        setExamQuestions(data.questions);
+                                        setSelectedResultAttempt(attempt);
+                                        setCurrentView('result');
+                                        setReviewActiveQuestionIndex(0);
+                                        setReviewActiveSubject('PHYSICS');
+                                      }
+                                    });
+                                }}
+                                className="text-xs font-bold bg-blue-50 text-blue-600 hover:bg-blue-100 px-3 py-1.5 rounded-md flex items-center gap-1 transition-colors"
+                              >
+                                Review Solutions <ChevronRight className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Dynamic Exam Configuration Dialog popup */}
+              {showNewTestWizard && (
+                <div className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
+                  <motion.div
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    className="bg-white rounded-xl shadow-2xl border border-slate-200 w-full max-w-2xl max-h-[85vh] flex flex-col"
+                  >
+                    <div className="bg-slate-950 p-5 text-white flex justify-between items-center rounded-t-xl">
+                      <div>
+                        <h3 className="font-extrabold text-base tracking-wide uppercase">JEE Mains Automated Test Setup</h3>
+                        <p className="text-xs text-slate-400">Select chapters to construct official 75-question Mock papers</p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setShowNewTestWizard(false);
+                          setWarningData(null);
+                        }}
+                        className="text-slate-300 hover:text-white"
+                      >
+                        ✕
+                      </button>
+                    </div>
+
+                    <div className="p-5 overflow-y-auto space-y-4 flex-1">
+                      {/* Chapter Selectors per Subject */}
+                      <div className="space-y-4">
+                        <div className="flex justify-between items-center bg-slate-50 p-2.5 rounded-lg border border-slate-200">
+                          <span className="text-xs font-bold text-slate-600">Select Syllabus:</span>
+                          <div className="space-x-2">
+                            <button
+                              onClick={() => {
+                                const allChaps = taxonomy.map(t => t.chapter);
+                                setSelectedChapters(allChaps);
+                              }}
+                              className="text-xxs font-bold text-blue-600 bg-blue-50 px-2 py-1 rounded"
+                            >
+                              Select All
+                            </button>
+                            <button
+                              onClick={() => setSelectedChapters([])}
+                              className="text-xxs font-bold text-slate-600 bg-slate-100 px-2 py-1 rounded"
+                            >
+                              Clear Selection
+                            </button>
+                          </div>
+                        </div>
+
+                        {(['PHYSICS', 'CHEMISTRY', 'MATHEMATICS'] as const).map((sub) => {
+                          const list = taxonomy.filter(item => item.subject === sub);
+                          return (
+                            <div key={sub} className="space-y-1.5">
+                              <h4 className="text-xs font-extrabold text-slate-700 tracking-wide uppercase flex items-center gap-2 border-b border-slate-100 pb-1">
+                                <Layers className="w-3.5 h-3.5 text-blue-600" /> {sub} Syllabus List
+                              </h4>
+                              <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 max-h-36 overflow-y-auto pr-1">
+                                {list.map((ch) => {
+                                  const selected = selectedChapters.includes(ch.chapter);
+                                  return (
+                                    <label
+                                      key={ch.id}
+                                      className={`flex items-start gap-2 p-2 rounded-md border text-xs cursor-pointer select-none transition-colors ${
+                                        selected
+                                          ? 'border-indigo-600 bg-indigo-50/50 text-indigo-900 font-medium'
+                                          : 'border-slate-200 hover:bg-slate-50 text-slate-600'
+                                      }`}
+                                    >
+                                      <input
+                                        type="checkbox"
+                                        checked={selected}
+                                        onChange={() => {
+                                          setSelectedChapters((prev) =>
+                                            selected
+                                              ? prev.filter((c) => c !== ch.chapter)
+                                              : [...prev, ch.chapter]
+                                          );
+                                        }}
+                                        className="mt-0.5"
+                                      />
+                                      <span className="truncate">
+                                        Unit {ch.unit}: {ch.chapter}
+                                      </span>
+                                    </label>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+
+                      {/* Warnings / Question Deficiency Handler */}
+                      {warningData && (
+                        <div className="border border-amber-200 bg-amber-50 rounded-lg p-4 space-y-3">
+                          <div className="flex gap-2 items-start text-amber-900">
+                            <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
+                            <div className="text-xs flex-1">
+                              <span className="font-extrabold block mb-1">⚠️ Deficient Questions in Selected Syllabus Chapters:</span>
+                              <p className="leading-relaxed">
+                                {warningData.message}
+                                <br />
+                                To run a standard 3-hour exam, we require at least 20 MCQs and 5 NVQs per subject.
+                              </p>
+                            </div>
+                          </div>
+
+                          {/* Inventory distribution report */}
+                          <div className="grid grid-cols-3 gap-2 bg-white/70 border border-amber-100 p-2.5 rounded-md text-xxs font-extrabold text-slate-700">
+                            {Object.keys(warningData.availableCounts).map((sub) => {
+                              const item = warningData.availableCounts[sub];
+                              return (
+                                <div key={sub} className="text-center">
+                                  <span className="text-slate-400 block pb-1">{sub}</span>
+                                  <span>MCQs: {item.MCQ}/20</span> | <span>NVQs: {item.NVQ}/5</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          <div className="text-xs font-bold text-amber-900 border-t border-amber-100 pt-2.5">
+                            Please select one of the following resolution pathways below:
+                          </div>
+
+                          <div className="flex flex-col sm:flex-row gap-2 pt-1">
+                            <button
+                              onClick={() => handleCreateTest({ forceGenerate: true })}
+                              className="flex-1 bg-amber-600 hover:bg-amber-700 text-white font-extrabold py-2 px-3 rounded text-xs uppercase tracking-wide transition-colors"
+                            >
+                              Include other syllabus chapters
+                            </button>
+                            <button
+                              onClick={() => handleCreateTest({ proportionalScale: true })}
+                              className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-2 px-3 rounded text-xs uppercase tracking-wide transition-colors"
+                            >
+                              Generate Balanced Mini-Test
+                            </button>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="bg-slate-50 px-5 py-4 flex justify-between items-center rounded-b-xl border-t border-slate-200">
+                      <span className="text-xs text-slate-500 font-medium">
+                        Selected: <strong className="text-slate-800">{selectedChapters.length}</strong> chapters
+                      </span>
+                      <button
+                        onClick={() => handleCreateTest()}
+                        disabled={selectedChapters.length === 0}
+                        className="bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 text-white px-5 py-2 rounded-lg font-extrabold text-xs uppercase tracking-wider transition-colors flex items-center gap-1.5"
+                      >
+                        <Play className="w-3.5 h-3.5 fill-current" /> Initialize Assessment
+                      </button>
+                    </div>
+                  </motion.div>
+                </div>
+              )}
+            </motion.div>
+          )}
+
+          {currentView === 'exam' && examQuestions.length > 0 && activeAttempt && (
+            <motion.div
+              key="exam"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-4"
+            >
+              {/* Exam title, subject tabs, and timer */}
+              <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-3">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-3 border-b border-slate-100 pb-3">
+                  <div>
+                    <h2 className="text-base font-extrabold text-indigo-900 tracking-tight flex items-center gap-1.5">
+                      <FileText className="w-4.5 h-4.5" /> Joint Entrance Examination (Main) Mock Replicates
+                    </h2>
+                    <span className="text-[10px] bg-indigo-50 text-indigo-700 font-extrabold px-2 py-0.5 rounded border border-indigo-100 uppercase tracking-widest mt-1 inline-block">
+                      Paper 1 — Compulsory Mode
+                    </span>
+                  </div>
+
+                  {/* Digital Clock replicates NTA */}
+                  <div className="bg-rose-50 text-rose-700 border border-rose-200 font-mono font-bold text-sm px-4 py-2 rounded-lg flex items-center gap-2 shadow-sm shrink-0">
+                    <Clock className="w-4 h-4 text-rose-600 animate-pulse" />
+                    <span>Time Left: </span>
+                    <span className="text-base tracking-wider font-extrabold">
+                      {Math.floor(quizTimer / 3600).toString().padStart(2, '0')}:
+                      {Math.floor((quizTimer % 3600) / 60).toString().padStart(2, '0')}:
+                      {(quizTimer % 60).toString().padStart(2, '0')}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Horizontal subject selection tabs replicating NTA */}
+                <div className="flex gap-2 border-b border-slate-100 overflow-x-auto pb-1.5 scrollbar-none">
+                  {(['PHYSICS', 'CHEMISTRY', 'MATHEMATICS'] as const).map((sub) => {
+                    const active = selectedSubject === sub;
+                    const subQuestions = examQuestions.filter(q => q.subject === sub);
+                    if (subQuestions.length === 0) return null;
+
+                    return (
+                      <button
+                        key={sub}
+                        onClick={() => {
+                          const targetQ = examQuestions.find(q => q.subject === sub);
+                          if (targetQ) {
+                            navigateToQuestion(examQuestions.indexOf(targetQ));
+                          }
+                        }}
+                        className={`px-5 py-2.5 text-xs font-extrabold tracking-wider rounded-t-lg transition-colors shrink-0 uppercase ${
+                          active
+                            ? 'bg-blue-600 text-white shadow-sm'
+                            : 'bg-slate-100/80 text-slate-600 hover:bg-slate-200'
+                        }`}
+                      >
+                        {sub} ({subQuestions.length})
+                      </button>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Central working pane splits */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
+                
+                {/* Question viewer workspace */}
+                <div className="bg-white border border-slate-200 rounded-xl shadow-sm lg:col-span-3 flex flex-col min-h-[500px]">
+                  
+                  {/* Question header info */}
+                  <div className="bg-slate-100/80 px-4 py-3 border-b border-slate-200 rounded-t-xl flex justify-between items-center text-xs text-slate-600 font-extrabold">
+                    <div className="flex items-center gap-3">
+                      <span className="bg-slate-200 text-slate-800 px-2 py-0.5 rounded">
+                        Q. No: {currentQuestionIndex + 1}
+                      </span>
+                      <span className="text-slate-500 uppercase">
+                        Section: {examQuestions[currentQuestionIndex].question_type === 'MCQ' ? 'A (MCQ)' : 'B (NVQ)'}
+                      </span>
+                    </div>
+                    <div className="text-right">
+                      <span className="text-blue-700">{examQuestions[currentQuestionIndex].chapter}</span>
+                      <span className="text-slate-300 mx-2">|</span>
+                      <span className="text-slate-400 font-medium">{examQuestions[currentQuestionIndex].topic}</span>
+                    </div>
+                  </div>
+
+                  {/* Scientific question body content */}
+                  <div className="p-5 flex-1 space-y-6 overflow-y-auto">
+                    <div className="bg-blue-50/45 text-blue-900 border border-blue-50 p-3 rounded-lg text-xxs font-extrabold uppercase tracking-wide flex items-center gap-1.5 mb-1">
+                      <Sparkles className="w-3.5 h-3.5 text-blue-500" />
+                      Marking Scheme: +4 for Correct, -1 for Incorrect, 0 if Unanswered
+                    </div>
+
+                    <div className="text-sm font-medium text-slate-850 leading-relaxed space-y-4">
+                      {/* Latex processing element */}
+                      <Latex content={examQuestions[currentQuestionIndex].question_text} className="prose max-w-none text-slate-800 text-sm md:text-base" />
+                    </div>
+
+                    {/* Standardised Choices Option Select Panel */}
+                    {examQuestions[currentQuestionIndex].question_type === 'MCQ' ? (
+                      <div className="space-y-3 pt-4 border-t border-slate-100">
+                        {['A', 'B', 'C', 'D'].map((opt) => {
+                          const optionText = examQuestions[currentQuestionIndex].options?.[opt as 'A'|'B'|'C'|'D'] || '';
+                          const active = userAnswers[examQuestions[currentQuestionIndex].id]?.selected_answer === opt;
+                          return (
+                            <button
+                              key={opt}
+                              onClick={() => handleSelectOption(opt)}
+                              className={`w-full text-left p-3.5 rounded-lg border text-xs sm:text-sm flex items-center gap-3 transition-colors ${
+                                active
+                                  ? 'border-blue-600 bg-blue-50/50 text-blue-950 font-bold'
+                                  : 'border-slate-200 hover:bg-slate-50 text-slate-700'
+                              }`}
+                            >
+                              <span className={`w-6 h-6 rounded-full border-2 flex items-center justify-center font-extrabold text-xs shrink-0 ${
+                                active ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 text-slate-500'
+                              }`}>
+                                {opt}
+                              </span>
+                              <div className="flex-1">
+                                {optionText}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    ) : (
+                      // Section B numerical key board panel
+                      <div className="pt-4 border-t border-slate-100 space-y-4">
+                        <div className="max-w-xs space-y-2">
+                          <label className="block text-xs font-extrabold text-slate-500 uppercase tracking-wider">
+                            Candidate Numerical Answer Input:
+                          </label>
+                          <input
+                            type="text"
+                            readOnly
+                            placeholder="Use virtual keypad below to input"
+                            value={userAnswers[examQuestions[currentQuestionIndex].id]?.selected_answer || ''}
+                            className="w-full text-center py-3 border-2 border-slate-300 rounded-lg text-lg font-mono font-black focus:outline-none focus:border-indigo-500 bg-slate-50 text-slate-800"
+                          />
+                        </div>
+
+                        {/* NTA Customized Keypad replicates terminal screens */}
+                        <div className="max-w-xs grid grid-cols-4 gap-2 bg-slate-100 p-2.5 rounded-xl border border-slate-200 shadow-sm">
+                          {['1', '2', '3', '-', '4', '5', '6', '.', '7', '8', '9', '0'].map((btn) => (
+                            <button
+                              key={btn}
+                              onClick={() => handleNumericInput(btn)}
+                              className="bg-white hover:bg-slate-50 border border-slate-200 py-2.5 rounded-lg font-extrabold text-sm shadow-sm transition-colors cursor-pointer select-none active:scale-95 text-slate-700"
+                            >
+                              {btn}
+                            </button>
+                          ))}
+                          <button
+                            onClick={() => handleNumericInput('BACKSPACE')}
+                            className="col-span-2 bg-yellow-50 hover:bg-yellow-100 border border-yellow-250 py-2.5 rounded-lg font-extrabold text-xs text-yellow-800 uppercase tracking-wider cursor-pointer active:scale-95"
+                          >
+                            Backspace
+                          </button>
+                          <button
+                            onClick={() => handleNumericInput('CLEAR')}
+                            className="col-span-2 bg-rose-50 hover:bg-rose-100 border border-rose-250 py-2.5 rounded-lg font-extrabold text-xs text-rose-800 uppercase tracking-wider cursor-pointer active:scale-95"
+                          >
+                            Clear
+                          </button>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Bottom operational controller of NTA console */}
+                  <div className="bg-slate-50/70 border-t border-slate-200 p-4 rounded-b-xl flex flex-wrap justify-between items-center gap-3">
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleMarkForReviewAndNext}
+                        className="bg-purple-50 hover:bg-purple-100 border border-purple-200 text-purple-700 font-extrabold text-xs uppercase tracking-wide px-4 py-2.5 rounded-lg transition-colors"
+                      >
+                        Mark for Review & Next
+                      </button>
+                      <button
+                        onClick={handleClearResponse}
+                        className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 font-extrabold text-xs uppercase tracking-wide px-4 py-2.5 rounded-lg transition-colors"
+                      >
+                        Clear Response
+                      </button>
+                    </div>
+
+                    <div className="flex gap-2">
+                      <button
+                        disabled={currentQuestionIndex === 0}
+                        onClick={() => navigateToQuestion(currentQuestionIndex - 1)}
+                        className="bg-white hover:bg-slate-100 border border-slate-200 text-slate-600 disabled:opacity-40 disabled:hover:bg-white font-extrabold text-xs uppercase tracking-wide px-4 py-2.5 rounded-lg transition-colors"
+                      >
+                        Back
+                      </button>
+                      <button
+                        onClick={handleSaveAndNext}
+                        className="bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs uppercase tracking-wider px-5 py-2.5 rounded-lg transition-colors shadow-sm"
+                      >
+                        Save & Next
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Sidebar Navigation Grid & Status report replicating NTA */}
+                <div className="space-y-4 lg:col-span-1">
+                  
+                  {/* Candidate Bio container */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm flex items-center gap-3">
+                    <div className="h-11 w-11 rounded-full bg-slate-100 flex items-center justify-center text-slate-500 border border-slate-200 font-bold shrink-0">
+                      C1
+                    </div>
+                    <div>
+                      <span className="text-[10px] text-slate-400 block font-bold uppercase">Candidate:</span>
+                      <span className="text-xs font-black truncate max-w-[150px] text-slate-700 block">
+                        {currentUser.username}
+                      </span>
+                      <span className="text-[9px] text-indigo-600 font-bold tracking-wider">
+                        EXAM_ID: JEE-{(activeAttempt.id * 1000 + 423).toString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Interactive Buttons Palette */}
+                  <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4">
+                    <h4 className="text-xxs font-extrabold text-slate-400 uppercase tracking-wider border-b border-slate-150 pb-2 flex justify-between">
+                      <span>Question Palette</span>
+                      <span className="text-indigo-600">{selectedSubject}</span>
+                    </h4>
+
+                    {/* Numeric Buttons Grid */}
+                    <div className="grid grid-cols-5 gap-1.5 p-1 bg-slate-50 rounded-lg">
+                      {currentSubjectQuizList.map((q, idx) => {
+                        const globalIndex = examQuestions.indexOf(q);
+                        const isCurrentActive = currentQuestionIndex === globalIndex;
+                        const state = userAnswers[q.id]?.palette_status || 'NOT_VISITED';
+
+                        // Custom shapes and borders mimicking actual NTA palette
+                        let shapeStyle = 'bg-gray-200 text-gray-700 hover:bg-gray-300'; // Default gray
+                        if (state === 'NOT_ANSWERED') {
+                          shapeStyle = 'bg-rose-600 text-white rounded-br-2xl rounded-tl-2xl'; // Not Answered curve
+                        } else if (state === 'ANSWERED') {
+                          shapeStyle = 'bg-emerald-600 text-white rounded-bl-3xl rounded-tr-3xl'; // Answered curved bottom-left
+                        } else if (state === 'MARKED_FOR_REVIEW') {
+                          shapeStyle = 'bg-indigo-600 text-white rounded-full'; // Circular
+                        } else if (state === 'ANSWERED_MARKED_FOR_REVIEW') {
+                          shapeStyle = 'bg-indigo-600 text-white rounded-full relative after:absolute after:-bottom-0.5 after:-right-0.5 after:w-3 after:h-3 after:bg-emerald-500 after:rounded-full after:border after:border-white animate-pulse'; // Circular with green badge
+                        }
+
+                        return (
+                          <button
+                            key={q.id}
+                            onClick={() => navigateToQuestion(globalIndex)}
+                            className={`w-full h-9 flex items-center justify-center text-[11px] font-black tracking-tight select-none cursor-pointer active:scale-95 transition-all outline-none ${shapeStyle} ${
+                              isCurrentActive ? 'ring-4 ring-blue-400 animate-pulse scale-105' : ''
+                            }`}
+                          >
+                            {idx + 1}
+                          </button>
+                        );
+                      })}
+                    </div>
+
+                    {/* NTA States Status statistics legend */}
+                    <div className="border-t border-slate-100 pt-3 space-y-2 text-[10px] font-bold text-slate-600">
+                      {(() => {
+                        const stats = getSubQuestionsCountOfPalette(selectedSubject);
+                        return (
+                          <>
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 h-4 bg-gray-200 flex items-center justify-center rounded text-slate-800 text-[9px] font-black">
+                                {stats.grey}
+                              </span>
+                              <span>Not Visited</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 h-4 bg-rose-600 text-white flex items-center justify-center rounded-br-2xl rounded-tl-2xl text-[9px] font-black">
+                                {stats.red}
+                              </span>
+                              <span>Not Answered</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 h-4 bg-emerald-600 text-white flex items-center justify-center rounded-bl-3xl rounded-tr-3xl text-[9px] font-black">
+                                {stats.green}
+                              </span>
+                              <span>Answered</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 h-4 bg-indigo-600 text-white flex items-center justify-center rounded-full text-[9px] font-black">
+                                {stats.purple}
+                              </span>
+                              <span>Marked for Review</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <span className="w-4 h-4 bg-indigo-600 text-white flex items-center justify-center rounded-full relative after:absolute after:bottom-0 after:right-0 after:w-2 after:h-2 after:bg-emerald-500 after:rounded-full text-[9px] font-black">
+                                {stats.purpleDot}
+                              </span>
+                              <span>Answered & Marked for Review</span>
+                            </div>
+                          </>
+                        );
+                      })()}
+                    </div>
+
+                    <button
+                      onClick={() => {
+                        if (confirm('Verify submission: Do you want to submit your mock examination now? (This ends current timed session)')) {
+                          handleSubmitExam();
+                        }
+                      }}
+                      className="w-full bg-indigo-600 hover:bg-slate-900 text-white font-extrabold uppercase py-3 rounded-lg flex items-center justify-center gap-1 text-xs shadow-md transition-colors"
+                    >
+                      Submit Exam
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {currentView === 'result' && selectedResultAttempt && (
+            <motion.div
+              key="result"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="space-y-6 animate-fade-in"
+            >
+              {/* Analytics Summary */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex gap-4 items-center justify-between border-b border-slate-100 pb-3">
+                  <div>
+                    <h2 className="text-xl font-black text-indigo-900">
+                      Mock Examination Performance Report
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Completed standard test attempt ID #{selectedResultAttempt.id} on {new Date(selectedResultAttempt.attempted_at).toLocaleDateString()}
+                    </p>
+                  </div>
+
+                  <button
+                    onClick={() => setCurrentView('dashboard')}
+                    className="bg-blue-600 hover:bg-blue-700 text-white py-2 px-4 rounded-lg font-bold text-xs uppercase tracking-wide transition-colors"
+                  >
+                    Return to Dashboard
+                  </button>
+                </div>
+
+                {/* Analytical breakdown grid */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-4 pt-2">
+                  <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-center shadow-inner">
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Total Score</span>
+                    <span className="text-2xl font-black text-indigo-800 tracking-tight block">
+                      {selectedResultAttempt.total_score} <span className="text-xs font-semibold text-slate-400">/ {selectedResultAttempt.test_total_questions * 4}</span>
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-center shadow-inner">
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-sans">January Percentile (95% CI)</span>
+                    <span className="text-sm font-black text-indigo-600 block mt-2 font-mono leading-tight">
+                      {formatPercentileRange(selectedResultAttempt.percentile_jan)}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-center shadow-inner">
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block font-sans">April Percentile (95% CI)</span>
+                    <span className="text-sm font-black text-emerald-600 block mt-2 font-mono leading-tight">
+                      {formatPercentileRange(selectedResultAttempt.percentile_april)}
+                    </span>
+                  </div>
+
+                  <div className="bg-slate-50 border border-slate-150 p-4 rounded-xl text-center shadow-inner">
+                    <span className="text-[10px] text-slate-400 font-extrabold uppercase tracking-widest block">Duration Taken</span>
+                    <span className="text-xl font-black text-slate-700 block mt-1">
+                      {Math.floor(selectedResultAttempt.time_taken_seconds / 60)}m {selectedResultAttempt.time_taken_seconds % 60}s
+                    </span>
+                  </div>
+                </div>
+
+                {/* Subject response distribution review statistics */}
+                <div className="grid grid-cols-3 gap-3 bg-slate-50 p-3 rounded-lg text-xxs font-extrabold text-slate-600 text-center">
+                  {(['PHYSICS', 'CHEMISTRY', 'MATHEMATICS'] as const).map(sub => {
+                    const pool = examQuestions.filter(q => q.subject === sub);
+                    let subCorrect = 0, subIncorrect = 0;
+                    pool.forEach(q => {
+                      const res = selectedResultAttempt.responses[q.id];
+                      if (res) {
+                        if (res.selected_answer && res.is_correct) subCorrect++;
+                        else if (res.selected_answer && !res.is_correct) subIncorrect++;
+                      }
+                    });
+                    return (
+                      <div key={sub} className="border-r last:border-0 border-slate-200">
+                        <span className="text-slate-400 uppercase tracking-wider block mb-1">{sub}</span>
+                        <span className="text-emerald-600">Correct: {subCorrect}</span> | <span className="text-rose-600">Wrong: {subIncorrect}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Solved Answers Key & Explanations Review Portal */}
+              <div className="grid grid-cols-1 lg:grid-cols-4 gap-4 items-start">
+                
+                {/* Result side selection palette */}
+                <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm space-y-4">
+                  <h4 className="text-xs font-black text-indigo-950 uppercase border-b border-slate-150 pb-2">
+                    Response Breakdown
+                  </h4>
+
+                  <div className="flex gap-1.5 border-b border-slate-150 pb-2 overflow-x-auto">
+                    {(['PHYSICS', 'CHEMISTRY', 'MATHEMATICS'] as const).map((sub) => (
+                      <button
+                        key={sub}
+                        onClick={() => {
+                          setReviewActiveSubject(sub);
+                          const firstSubQ = examQuestions.find(q => q.subject === sub);
+                          if (firstSubQ) setReviewActiveQuestionIndex(examQuestions.indexOf(firstSubQ));
+                        }}
+                        className={`px-3 py-1.5 text-xxs font-extrabold rounded-md uppercase tracking-wider ${
+                          reviewActiveSubject === sub ? 'bg-indigo-600 text-white' : 'bg-slate-100/70 text-slate-500 hover:bg-slate-200'
+                        }`}
+                      >
+                        {sub}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="grid grid-cols-5 gap-1.5 p-1 bg-slate-50 rounded-lg max-h-[300px] overflow-y-auto">
+                    {examQuestions
+                      .filter(q => q.subject === reviewActiveSubject)
+                      .map((q, idx) => {
+                        const globalIndex = examQuestions.indexOf(q);
+                        const userRes = selectedResultAttempt.responses[q.id];
+                        const isCorrect = userRes?.is_correct;
+                        const isAttempted = userRes?.selected_answer !== null && userRes?.selected_answer !== '' && userRes?.selected_answer !== undefined;
+                        
+                        let dotColor = 'bg-gray-200 text-slate-500';
+                        if (isAttempted) {
+                          dotColor = isCorrect 
+                            ? 'bg-emerald-500 text-white font-extrabold' 
+                            : 'bg-rose-500 text-white font-extrabold';
+                        }
+
+                        return (
+                          <button
+                            key={q.id}
+                            onClick={() => {
+                              setReviewActiveQuestionIndex(globalIndex);
+                            }}
+                            className={`w-full h-8 flex items-center justify-center text-xs font-bold rounded-md transition-transform active:scale-95 cursor-pointer select-none ${dotColor} ${
+                              reviewActiveQuestionIndex === globalIndex ? 'ring-2 ring-indigo-500 font-black' : ''
+                            }`}
+                          >
+                            {idx + 1}
+                          </button>
+                        );
+                      })}
+                  </div>
+
+                  <div className="text-[10px] font-bold text-slate-500 space-y-1 py-1 bg-slate-50 rounded p-2.5">
+                    <span className="block font-black uppercase text-xxs text-slate-600 mb-1 leading-none">Result Legend:</span>
+                    <div className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 bg-emerald-500 rounded-sm"></span> Correct answer</div>
+                    <div className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 bg-rose-500 rounded-sm"></span> Incorrect option</div>
+                    <div className="flex items-center gap-1.5"><span className="w-3.5 h-3.5 bg-gray-200 rounded-sm"></span> Unattempted question</div>
+                  </div>
+                </div>
+
+                {/* Detailed Solved Question display panel with latex explanations */}
+                <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm lg:col-span-3 min-h-[400px] flex flex-col space-y-5">
+                  {examQuestions[reviewActiveQuestionIndex] && (() => {
+                    const qObj = examQuestions[reviewActiveQuestionIndex];
+                    const uRes = selectedResultAttempt.responses[qObj.id];
+                    const isCorrect = uRes?.is_correct;
+
+                    return (
+                      <>
+                        <div className="flex justify-between items-center bg-slate-50 p-3 rounded-lg border border-slate-200 text-xs text-slate-600">
+                          <div>
+                            <span className="font-extrabold uppercase mr-3">Question #{reviewActiveQuestionIndex + 1}</span>
+                            <span className="font-medium bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded mr-3">
+                              Type: {qObj.question_type}
+                            </span>
+                            <span className="font-medium bg-slate-200 text-slate-700 px-2.5 py-0.5 rounded">
+                              Time spent: {uRes?.time_spent_seconds || 0}s
+                            </span>
+                          </div>
+                          <div>
+                            <span className="font-extrabold text-blue-800">{qObj.chapter}</span>
+                          </div>
+                        </div>
+
+                        <div className="space-y-4">
+                          <Latex content={qObj.question_text} className="prose text-slate-800 text-sm md:text-base leading-relaxed" />
+                        </div>
+
+                        {/* Candidate Selected Option vs Real Answer stats */}
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 border-t border-slate-100 pt-4 text-xs font-bold">
+                          <div className={`p-4 rounded-xl border flex items-center justify-between shadow-sm ${
+                            uRes?.selected_answer ? (isCorrect ? 'border-emerald-300 bg-emerald-50/50 text-emerald-950' : 'border-rose-300 bg-rose-50/50 text-rose-950') : 'border-slate-200 bg-slate-50 text-slate-500'
+                          }`}>
+                            <div>
+                              <span>Candidate Selected Answer:</span>
+                              <span className="block font-black text-base tracking-wide mt-1">
+                                {uRes?.selected_answer ? uRes.selected_answer : 'UNATTEMPTED'}
+                              </span>
+                            </div>
+                            {uRes?.selected_answer ? (
+                              isCorrect 
+                                ? <CheckCircle className="w-8 h-8 text-emerald-500" /> 
+                                : <XCircle className="w-8 h-8 text-rose-500" />
+                            ) : null}
+                          </div>
+
+                          <div className="p-4 rounded-xl border border-indigo-200 bg-indigo-50/40 text-indigo-950 flex items-center justify-between shadow-sm">
+                            <div>
+                              <span>Official Verified Key:</span>
+                              <span className="block font-black text-indigo-950 text-base tracking-wide mt-1">
+                                {qObj.correct_answer}
+                              </span>
+                            </div>
+                            <Award className="w-8 h-8 text-indigo-600" />
+                          </div>
+                        </div>
+
+                        {/* Text Solution/Explanation LaTeX rendering */}
+                        <div className="border-t border-indigo-100 pt-4 bg-indigo-50/15 p-4 rounded-xl space-y-3">
+                          <h4 className="font-black text-xs text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
+                            <BookOpen className="w-4 h-4 text-indigo-600" /> Step-by-Step Explanation / Math Solution:
+                          </h4>
+                          <Latex content={qObj.solution_text} className="prose max-w-none text-slate-800 text-sm md:text-base whitespace-pre-wrap leading-relaxed" />
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              </div>
+            </motion.div>
+          )}
+
+          {currentView === 'admin' && (
+            <motion.div
+              key="admin"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="max-w-3xl mx-auto space-y-6"
+            >
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex justify-between items-center border-b border-slate-100 pb-3">
+                  <div>
+                    <h2 className="text-xl font-black text-slate-800 flex items-center gap-2">
+                      <Database className="text-blue-600 w-6 h-6 animate-pulse" /> AI PDF Parser
+                    </h2>
+                    <p className="text-xs text-slate-400 mt-0.5">
+                      Phase 1: Ingest question banks automatically, extract questions, solutions, and run taggers
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setCurrentView('dashboard')}
+                    className="bg-slate-100 hover:bg-slate-200 text-slate-700 py-1.5 px-3.5 rounded text-xs font-bold uppercase transition-colors"
+                  >
+                    Back to Dashboard
+                  </button>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {/* Question file upload box */}
+                  <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 bg-slate-50 text-center flex flex-col items-center justify-center min-h-[160px] hover:border-blue-400 transition-colors">
+                    <Upload className="w-8 h-8 text-slate-400 mb-2" />
+                    <span className="text-xs font-extrabold text-slate-700 block mb-1">Upload Question Paper PDF</span>
+                    <input
+                      type="file"
+                      accept=".pdf"
+                      onChange={(e) => handleFileChange(e, 'q')}
+                      className="text-xxs text-slate-500 max-w-[200px]"
+                    />
+                    {questionPdfBase64 && (
+                      <span className="text-[10px] text-emerald-600 font-extrabold mt-2 flex items-center gap-1 justify-center">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> PDF Loaded
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Solutions file upload box */}
+                  <div className="border-2 border-dashed border-slate-200 rounded-xl p-4 bg-slate-50 text-center flex flex-col items-center justify-center min-h-[160px] hover:border-blue-400 transition-colors">
+                    <Upload className="w-8 h-8 text-slate-400 mb-2 animate-pulse" />
+                    <span className="text-xs font-extrabold text-slate-700 block mb-1">Upload Answer Explanation PDF</span>
+                    <input
+                      type="file"
+                      accept=".pdf"
+                      onChange={(e) => handleFileChange(e, 'sol')}
+                      className="text-xxs text-slate-500 max-w-[200px]"
+                    />
+                    {solutionPdfBase64 && (
+                      <span className="text-[10px] text-emerald-600 font-extrabold mt-2 flex items-center gap-1 justify-center">
+                        <CheckCircle2 className="w-3.5 h-3.5" /> PDF Loaded
+                      </span>
+                    )}
+                  </div>
+
+                  {/* State Sync Center Card */}
+                  <div className="border border-indigo-250 rounded-xl p-4 bg-gradient-to-br from-indigo-50/40 via-white to-sky-50/20 flex flex-col items-center justify-between min-h-[160px] text-center shadow-xs">
+                    <div className="flex flex-col items-center">
+                      <div className="relative">
+                        <Database className="w-8 h-8 text-indigo-500 mb-1" />
+                        <span className="absolute -top-1 -right-1 flex h-2.5 w-2.5">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                        </span>
+                      </div>
+                      <span className="text-xs font-black text-indigo-950 uppercase block">Local Offline Backup</span>
+                      <span className="text-[10px] text-slate-500 font-bold block mt-1 leading-snug">
+                        Local File System Import/Export
+                      </span>
+                      {lastSyncTime && (
+                        <span className="text-[9px] text-slate-400 font-mono block mt-0.5">
+                          Last backup: {lastSyncTime}
+                        </span>
+                      )}
+                    </div>
+                    
+                    <div className="w-full space-y-1.5 mt-2">
+                      <a
+                        href="/api/admin/download-db"
+                        download
+                        className="w-full text-[9px] font-bold text-indigo-800 bg-white hover:bg-slate-50 border border-slate-200 uppercase px-2 py-1.5 rounded inline-flex items-center justify-center gap-1 shadow-xs transition-all cursor-pointer select-none"
+                        title="Download a local JSON copy of your database"
+                      >
+                        <Download className="w-3 h-3 text-indigo-500" /> Export db.json
+                      </a>
+                      
+                      <label className="w-full text-[9px] font-bold text-slate-700 bg-white hover:bg-slate-100 border border-slate-200 uppercase px-2 py-1.5 rounded inline-flex items-center justify-center gap-1 shadow-xs transition-all cursor-pointer select-none">
+                        <Upload className="w-3 h-3 text-slate-500" /> Import .json file
+                        <input
+                          type="file"
+                          accept=".json"
+                          onChange={handleLocalBackupRestoreFromFile}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={handleLaunchParser}
+                  disabled={isParsing || !questionPdfBase64 || !solutionPdfBase64}
+                  className="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-300 disabled:text-slate-500 text-white font-extrabold py-3 rounded-lg text-xs uppercase tracking-wider flex items-center justify-center gap-2 shadow-sm transition-colors cursor-pointer select-none"
+                >
+                  {isParsing ? (
+                    <>
+                      <div className="w-4 h-4 rounded-full border-2 border-white border-t-transparent animate-spin"></div>
+                      Extacting Structured Questions...
+                    </>
+                  ) : (
+                    <>
+                      <Layers className="w-4.5 h-4.5" /> Run AI Parser & Taxonomy Tagger
+                    </>
+                  )}
+                </button>
+              </div>
+
+              {/* 1TB Google Drive Cloud Sync panel */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-100 pb-3 gap-3">
+                  <div className="flex items-center gap-2.5">
+                    <Cloud className="text-indigo-650 w-6 h-6 animate-pulse" />
+                    <div>
+                      <h3 className="text-sm font-black text-slate-800">Google Drive Cloud Sync</h3>
+                      <p className="text-[10px] text-slate-400">
+                        Synchronize your question database, taxonomies, and candidates directly with Google Drive.
+                      </p>
+                    </div>
+                  </div>
+
+                  <div>
+                    {googleAccessToken ? (
+                      <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-emerald-50 text-emerald-700 text-[10px] font-black border border-emerald-200 uppercase tracking-wider">
+                        <span className="flex h-1.5 w-1.5 relative">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                          <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-emerald-500"></span>
+                        </span>
+                        Authenticated & Ready
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded bg-amber-50 text-amber-700 text-[10px] font-black border border-amber-200 uppercase tracking-wider">
+                        OAuth Unauthorized
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                {syncStatus && (
+                  <div className={`border p-3.5 rounded-xl flex items-start gap-3 transition-all ${
+                    syncStatus.type === 'success' 
+                      ? 'bg-emerald-50/80 border-emerald-200 text-emerald-950' 
+                      : syncStatus.type === 'error' 
+                        ? 'bg-rose-50/80 border-rose-200 text-rose-950' 
+                        : 'bg-indigo-50/80 border-indigo-200 text-indigo-950'
+                  }`}>
+                    <div className="mt-0.5 shrink-0">
+                      {syncStatus.type === 'success' ? (
+                        <CheckCircle2 className="w-4.5 h-4.5 text-emerald-600" />
+                      ) : syncStatus.type === 'error' ? (
+                        <XCircle className="w-4.5 h-4.5 text-rose-500" />
+                      ) : (
+                        <RefreshCw className="w-4 h-4 text-indigo-600 animate-spin" />
+                      )}
+                    </div>
+                    <div className="flex-1 space-y-0.5">
+                      <span className="font-extrabold text-[11px] uppercase tracking-wider block">
+                        {syncStatus.message}
+                      </span>
+                      {syncStatus.details && (
+                        <p className="text-[10px] opacity-90 leading-relaxed">
+                          {syncStatus.details}
+                        </p>
+                      )}
+                    </div>
+                    <button 
+                      onClick={() => setSyncStatus(null)}
+                      className="text-slate-400 hover:text-slate-600 focus:outline-hidden font-bold text-xs px-1 hover:bg-slate-100 rounded cursor-pointer transition-colors"
+                      title="Clear notification"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                )}
+
+                {googleAccessToken ? (
+                  // STATE A: AUTHORIZED & CONNECTED
+                  <div className="bg-emerald-50/20 border border-emerald-150 rounded-xl p-4 space-y-4">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-white p-3 border border-emerald-100 rounded-lg">
+                      <div className="space-y-0.5">
+                        <span className="text-[9px] uppercase tracking-widest font-extrabold text-slate-400 block">Active Access Token</span>
+                        <code className="text-xs font-mono font-bold text-slate-700 select-all">
+                          {googleAccessToken.substring(0, 10)}••••••••••••••••{googleAccessToken.substring(googleAccessToken.length - 6)}
+                        </code>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setGoogleAccessToken('');
+                          localStorage.removeItem('jee_google_access_token');
+                        }}
+                        className="text-[10px] font-extrabold text-rose-600 hover:text-rose-800 uppercase tracking-wide flex items-center gap-1 bg-rose-50 hover:bg-rose-100 px-3 py-1.5 rounded transition-all cursor-pointer"
+                      >
+                        Disconnect Token
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Backup Card */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col justify-between">
+                        <div className="space-y-1 mb-3">
+                          <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <Download className="w-4 h-4 text-emerald-600" /> Save to Google Drive
+                          </h4>
+                          <p className="text-[10px] text-slate-500 leading-normal">
+                            Instantly backup the current system questions and database to your Google Drive as <strong className="font-semibold text-slate-700 font-mono text-[9px]">jee_prep_db_dump.json</strong>.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleGdriveBackup}
+                          disabled={isGdriveSyncing}
+                          className="w-full bg-emerald-600 hover:bg-emerald-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-extrabold py-2 px-3 rounded-lg text-xs uppercase transition-colors flex items-center justify-center gap-1.5 cursor-pointer select-none shadow-xs"
+                        >
+                          {isGdriveSyncing ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Download className="w-4 h-4 text-white" />
+                          )}
+                          Make Cloud Backup
+                        </button>
+                      </div>
+
+                      {/* Restore Card */}
+                      <div className="bg-white border border-slate-200 rounded-lg p-4 flex flex-col justify-between">
+                        <div className="space-y-1 mb-3">
+                          <h4 className="font-extrabold text-xs text-slate-800 uppercase tracking-wider flex items-center gap-1.5">
+                            <Upload className="w-4 h-4 text-indigo-650" /> Restore from Google Drive
+                          </h4>
+                          <p className="text-[10px] text-slate-500 leading-normal">
+                            Download the saved cloud database backup (<strong className="font-semibold text-slate-700 font-mono text-[9px]">jee_prep_db_dump.json</strong>) from Google Drive and Hot-Restore it now.
+                          </p>
+                        </div>
+                        <button
+                          onClick={handleGdriveRestore}
+                          disabled={isGdriveSyncing}
+                          className="w-full bg-indigo-650 hover:bg-indigo-700 disabled:bg-slate-200 disabled:text-slate-400 text-white font-extrabold py-2 px-3 rounded-lg text-xs uppercase transition-colors flex items-center justify-center gap-1.5 cursor-pointer select-none shadow-xs"
+                        >
+                          {isGdriveSyncing ? (
+                            <RefreshCw className="w-4 h-4 animate-spin" />
+                          ) : (
+                            <Upload className="w-4 h-4 text-white" />
+                          )}
+                          Restore from Backup
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  // STATE B: UNAUTHORIZED SELECTION (STREAMLINED 2-STEP SETUP)
+                  <div className="space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* STEP 1: PLAYGROUND SHORTCUT */}
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                        <div className="space-y-1.5">
+                          <span className="text-[9px] font-black uppercase text-indigo-600 bg-indigo-50 px-2 py-0.5 rounded border border-indigo-150 inline-block">Step 1: Get Access Token</span>
+                          <p className="text-[11px] text-slate-600 leading-normal">
+                            Authorise restricted Google Drive scopes (<code className="text-xs bg-slate-100 font-mono px-1">drive.file</code>) inside Google OAuth Playground to limit access to only the folder created by this app.
+                          </p>
+                        </div>
+                        <a 
+                          href="https://developers.google.com/oauthplayground/#scopes=https://www.googleapis.com/auth/drive.file" 
+                          target="_blank" 
+                          rel="noopener noreferrer"
+                          className="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-extrabold py-2 px-3 rounded-lg text-[10px] uppercase text-center transition-colors flex items-center justify-center gap-1 shadow-xs"
+                        >
+                          🔗 Open Google Auth Playground ↗
+                        </a>
+                      </div>
+
+                      {/* STEP 2: PASTE BOX */}
+                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 flex flex-col justify-between space-y-3">
+                        <div className="space-y-1.5">
+                          <span className="text-[9px] font-black uppercase text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-150 inline-block">Step 2: Paste Access Token Below</span>
+                          <p className="text-[11px] text-slate-600 leading-normal">
+                            Paste your generated access token (starts with <code className="bg-slate-150 px-1 rounded font-mono text-[9px] text-emerald-800">ya29...</code>) to instantly pair.
+                          </p>
+                        </div>
+                        
+                        <div className="space-y-1">
+                          <input
+                            type="password"
+                            placeholder="Paste token (ya29...)"
+                            value={googleAccessToken}
+                            onChange={(e) => {
+                              const val = e.target.value.trim();
+                              setGoogleAccessToken(val);
+                              localStorage.setItem('jee_google_access_token', val);
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded px-2.5 py-2 focus:outline-hidden focus:ring-1 focus:ring-indigo-600 text-xs font-mono shadow-inner text-indigo-950 font-bold"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* STEPS EXPLANATION CALLOUT FOR OAUTH PLAYGROUND */}
+                    <div className="bg-amber-50/50 border border-amber-200 rounded-xl p-4 space-y-3">
+                      <span className="text-[10px] font-black text-amber-800 uppercase tracking-wider flex items-center gap-1">
+                        💡 Google OAuth Playground Guide & Troubleshooting:
+                      </span>
+                      
+                      <div className="bg-rose-50/80 border border-rose-200 p-3 rounded-lg space-y-1">
+                        <h5 className="text-[10px] font-black text-rose-950 uppercase tracking-wide">⚠️ Preventing the "500 Internal Server Error"</h5>
+                        <p className="text-[10px] text-slate-600 leading-normal">
+                          If Google throws a <strong className="text-rose-700">500 error / Something bad happened</strong> on authorization, it means the browser is confused by <strong>multiple active Google Account logins</strong> or blocked cookies.
+                        </p>
+                        <p className="text-[10px] text-rose-900 font-extrabold leading-normal mt-1">
+                          👉 Fix: Open Google Drive in an Incognito / Private Window, navigate back here, and then open the Playground.
+                        </p>
+                      </div>
+
+                      <div className="bg-emerald-50/80 border border-emerald-200 p-3 rounded-lg space-y-1">
+                        <h5 className="text-[10px] font-black text-emerald-950 uppercase tracking-wide">🛡️ Least Privilege Protection Enabled</h5>
+                        <p className="text-[10px] text-slate-600 leading-normal">
+                          We use the narrowed <code className="bg-white/60 px-1 font-mono text-[9px]">https://www.googleapis.com/auth/drive.file</code> scope instead of the broad Drive scope, guaranteeing that this app **cannot see or touch your other files**. It only accesses its own folder named <strong className="text-emerald-900">GOOGLE AI Studio</strong>.
+                        </p>
+                      </div>
+
+                      <ol className="list-decimal list-inside text-[11px] text-slate-600 space-y-2 leading-relaxed pl-1">
+                        <li>
+                          Click the <strong className="text-indigo-600">Open Google Auth Playground ↗</strong> button above (preferably inside an Incognito tab).
+                        </li>
+                        <li>
+                          On the left sidebar, under <strong className="text-slate-700">Step 1: Select & authorize APIs</strong>:
+                          <ul className="list-disc list-inside text-[10px] text-slate-500 pl-4 space-y-1 mt-1">
+                            <li>
+                              Scroll down the list and locate <strong className="text-slate-700">Drive API v3</strong>.
+                            </li>
+                            <li>
+                              Click it to expand, and check the checkbox for <code className="bg-slate-100 px-1 py-0.5 rounded text-indigo-700 font-mono text-[9.5px]">https://www.googleapis.com/auth/drive.file</code>.
+                            </li>
+                            <li>
+                              <em>Alternatively:</em> scroll to the bottom of the Step 1 panel, paste <code className="bg-indigo-50 text-indigo-800 font-mono px-1 rounded text-[9.5px]">https://www.googleapis.com/auth/drive.file</code> inside the input field, and click <strong className="text-indigo-600">Authorize APIs</strong>.
+                            </li>
+                          </ul>
+                        </li>
+                        <li>
+                          Login and grant permissions on Google's consent screen.
+                        </li>
+                        <li>
+                          Once redirected back to the Playground, click the blue <strong className="text-indigo-650">Exchange authorization code for tokens</strong> button.
+                        </li>
+                        <li>
+                          Scroll down to find the <strong className="text-indigo-950">Access Token</strong> field (not the "Authorization Code"!). Copy that long value (starts with <code className="bg-slate-150 font-mono text-[10px] px-1 rounded text-slate-700">ya29...</code>) and paste it into our <strong className="text-emerald-700">Step 2</strong> box.
+                        </li>
+                      </ol>
+                    </div>
+                  </div>
+                )}
+
+                {/* ADVANCED DEVELOPMENT ACCORDION */}
+                {!googleAccessToken && (
+                  <details className="text-[10px] border border-slate-150 rounded-xl p-3 bg-slate-50/50 transition-all cursor-pointer">
+                    <summary className="font-bold text-slate-500 hover:text-slate-700 uppercase tracking-wider outline-none select-none text-[9px] flex items-center gap-1">
+                      🛠️ Setup Custom Client Credentials (Advanced Developers)
+                    </summary>
+                    <div className="mt-3 space-y-3 pt-3 border-t border-slate-100 cursor-default" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-[10px] text-slate-500 leading-relaxed font-normal">
+                        To activate a persistent standard Google login button for custom domain scopes, register your custom client credentials below:
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div className="space-y-1">
+                          <label className="text-[9px] font-extrabold text-slate-400 block uppercase">Google OAuth Client ID</label>
+                          <input
+                            type="text"
+                            placeholder="xxxx-xxxx.apps.googleusercontent.com"
+                            value={googleClientId}
+                            onChange={(e) => {
+                              const val = e.target.value.trim();
+                              setGoogleClientId(val);
+                              localStorage.setItem('jee_google_client_id', val);
+                            }}
+                            className="w-full bg-white border border-slate-200 rounded px-2.5 py-1.5 focus:outline-hidden focus:ring-1 focus:ring-indigo-500 text-xs font-mono"
+                          />
+                        </div>
+                        <div className="space-y-1 flex flex-col justify-end">
+                          <button
+                            onClick={() => {
+                              const clientId = googleClientId.trim();
+                              if (!clientId) {
+                                triggerStatus('error', 'Client ID Missing', 'Please supply your custom Google OAuth Client ID first under advanced credentials.');
+                                return;
+                              }
+                              const redirectUri = window.location.origin + "/auth/callback";
+                              const scopes = ['https://www.googleapis.com/auth/drive.file'];
+                              const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=token&scope=${encodeURIComponent(scopes.join(' '))}&prompt=consent`;
+                              
+                              const width = 600;
+                              const height = 650;
+                              const left = window.screen.width / 2 - width / 2;
+                              const top = window.screen.height / 2 - height / 2;
+                              const popup = window.open(authUrl, 'GoogleDriveSyncAuth', `width=${width},height=${height},top=${top},left=${left},resizable=yes,scrollbars=yes,status=yes`);
+                              if (!popup || popup.closed || typeof popup.closed === 'undefined') {
+                                window.location.href = authUrl;
+                              }
+                            }}
+                            className="w-full bg-slate-900 hover:bg-slate-800 text-white font-extrabold py-2 px-3 rounded text-[10px] uppercase transition-all whitespace-nowrap cursor-pointer"
+                          >
+                            🚪 Launch Standard Sign In
+                          </button>
+                        </div>
+                      </div>
+                      <div className="text-[9px] text-slate-400 leading-normal bg-white p-2 border border-slate-200 rounded-md">
+                        <strong>Authorized Redirect URI:</strong>
+                        <div className="bg-slate-50 p-1.5 rounded font-mono text-[9px] text-slate-600 mt-1 select-all">{window.location.origin}/auth/callback</div>
+                      </div>
+                    </div>
+                  </details>
+                )}
+              </div>
+
+              {/* Console Logs indicator */}
+              {(isParsing || parsingLogs.length > 0) && (
+                <div className="bg-slate-950 rounded-xl p-5 shadow-lg border border-slate-800 text-slate-300 space-y-3 font-mono text-xs">
+                  <div className="flex justify-between items-center border-b border-slate-900 pb-2 mb-2 text-xxs font-black text-slate-500 uppercase tracking-widest">
+                    <span>ETL execution dashboard logs</span>
+                    <span className="text-indigo-400">{isParsing ? 'ACTIVE_RUNNABLE' : 'COMPLETED'}</span>
+                  </div>
+
+                  <div className="space-y-1 max-h-[220px] overflow-y-auto scrollbar-thin">
+                    {parsingLogs.map((log, i) => {
+                      let tagColor = 'text-indigo-400';
+                      if (log.startsWith('SUCCESS:')) tagColor = 'text-emerald-400 font-extrabold';
+                      if (log.startsWith('ERROR:') || log.startsWith('SYSTEM ERROR:')) tagColor = 'text-rose-400 font-extrabold';
+                      return (
+                        <div key={i} className="flex gap-2">
+                          <span className="text-slate-600 select-none">[{i+1}]</span>
+                          <span className={tagColor}>{log}</span>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {/* SECTION 2: QUESTION BANK & TAGGING INVENTORY */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+                <div className="flex flex-col md:flex-row md:items-center justify-between border-b border-slate-100 pb-4 gap-3">
+                  <div>
+                    <h3 className="text-base font-black text-slate-800 flex items-center gap-2">
+                      <Layers className="text-indigo-600 w-5 h-5" /> Question Library & Tagging Dashboard
+                    </h3>
+                    <p className="text-xxs text-slate-400">
+                      Review, filter, edit tagging taxonomy, and manage JEE questions across Physics, Chemistry, and Mathematics real-time
+                    </p>
+                  </div>
+                  
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Subject Filter Buttons */}
+                    <div className="bg-slate-100 p-1 rounded-lg flex items-center gap-1 text-xxs font-bold">
+                      {(['ALL', 'PHYSICS', 'CHEMISTRY', 'MATHEMATICS'] as const).map(sub => (
+                        <button
+                          key={sub}
+                          type="button"
+                          onClick={() => setAdminSubjectFilter(sub)}
+                          className={`px-2.5 py-1.5 rounded transition-all cursor-pointer ${
+                            adminSubjectFilter === sub 
+                              ? 'bg-white text-indigo-700 shadow-sm' 
+                              : 'text-slate-600 hover:text-slate-950'
+                          }`}
+                        >
+                          {sub}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+
+                {/* Search query box */}
+                <div className="relative">
+                  <Search className="absolute left-3 top-2.5 w-4.5 h-4.5 text-slate-400" />
+                  <input
+                    type="text"
+                    placeholder="Search question text content, chapter name, or specific topic tags..."
+                    value={adminSearch}
+                    onChange={(e) => setAdminSearch(e.target.value)}
+                    className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white text-xs text-slate-800 placeholder:text-slate-400"
+                  />
+                </div>
+
+                {/* Inline Editing Form */}
+                {adminEditingQuestion && (
+                  <div className="border-2 border-indigo-500 rounded-xl p-4 bg-indigo-50/25 space-y-4 shadow-md relative">
+                    <div className="flex justify-between items-center border-b border-indigo-100 pb-2">
+                      <h4 className="font-extrabold text-xs text-indigo-950 flex items-center gap-1">
+                        <Edit className="w-4 h-4 text-indigo-600" /> Modify Question & Metadata (ID #{adminEditingQuestion.id})
+                      </h4>
+                      <button 
+                        type="button"
+                        onClick={() => setAdminEditingQuestion(null)}
+                        className="text-slate-400 hover:text-slate-600 cursor-pointer"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Subject</label>
+                        <select
+                          value={adminEditingQuestion.subject}
+                          onChange={(e) => {
+                            const sub = e.target.value as 'PHYSICS' | 'CHEMISTRY' | 'MATHEMATICS';
+                            // Dynamic fallback set to find first chapter in that subject's list
+                            const firstCh = taxonomy.find(t => t.subject === sub)?.chapter || 'Units and Measurements';
+                            setAdminEditingQuestion({
+                              ...adminEditingQuestion,
+                              subject: sub,
+                              chapter: firstCh
+                            });
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        >
+                          <option value="PHYSICS">PHYSICS</option>
+                          <option value="CHEMISTRY">CHEMISTRY</option>
+                          <option value="MATHEMATICS">MATHEMATICS</option>
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Chapter Tag</label>
+                        <select
+                          value={adminEditingQuestion.chapter}
+                          onChange={(e) => setAdminEditingQuestion({
+                            ...adminEditingQuestion,
+                            chapter: e.target.value
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        >
+                          {taxonomy
+                            .filter(t => t.subject === adminEditingQuestion.subject)
+                            .map((t, index) => (
+                              <option key={`${t.id}-${index}`} value={t.chapter}>
+                                {t.chapter}
+                              </option>
+                            ))
+                          }
+                          {/* absolute safety fallbacks */}
+                          {taxonomy.filter(t => t.subject === adminEditingQuestion.subject).length === 0 && (
+                            <>
+                              <option value="Units and Measurements">Units and Measurements</option>
+                              <option value="Sets, Relations and Functions">Sets, Relations and Functions</option>
+                              <option value="Some Basic Concepts in Chemistry">Some Basic Concepts in Chemistry</option>
+                            </>
+                          )}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Topic Subcategory</label>
+                        <input
+                          type="text"
+                          value={adminEditingQuestion.topic}
+                          placeholder="e.g. Kinematics Equations"
+                          onChange={(e) => setAdminEditingQuestion({
+                            ...adminEditingQuestion,
+                            topic: e.target.value
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-750 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                      </div>
+
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">Question Type</label>
+                        <select
+                          value={adminEditingQuestion.question_type}
+                          onChange={(e) => {
+                            const val = e.target.value as 'MCQ' | 'NVQ';
+                            setAdminEditingQuestion({
+                              ...adminEditingQuestion,
+                              question_type: val,
+                              correct_answer: val === 'MCQ' ? 'A' : ''
+                            });
+                          }}
+                          className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs font-bold text-slate-700 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        >
+                          <option value="MCQ">MCQ (Multiple Choice Questions)</option>
+                          <option value="NVQ">NVQ (Numerical Value Questions)</option>
+                        </select>
+                      </div>
+
+                      <div className="md:col-span-2">
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
+                          Correct Answer Keys {adminEditingQuestion.question_type === 'MCQ' ? '(A, B, C, or D)' : '(Numerical Integer)'}
+                        </label>
+                        {adminEditingQuestion.question_type === 'MCQ' ? (
+                          <div className="flex gap-1.5">
+                            {(['A', 'B', 'C', 'D'] as const).map(ans => (
+                              <button
+                                type="button"
+                                key={ans}
+                                onClick={() => setAdminEditingQuestion({ ...adminEditingQuestion, correct_answer: ans })}
+                                className={`flex-1 py-1.5 rounded-lg border text-xs font-extrabold transition-all cursor-pointer ${
+                                  adminEditingQuestion.correct_answer === ans 
+                                    ? 'border-indigo-600 bg-indigo-600 text-white' 
+                                    : 'border-slate-200 bg-white text-slate-700 hover:bg-slate-50'
+                                }`}
+                              >
+                                Option {ans}
+                              </button>
+                            ))}
+                          </div>
+                        ) : (
+                          <input
+                            type="text"
+                            placeholder="e.g. 5"
+                            value={adminEditingQuestion.correct_answer}
+                            onChange={(e) => setAdminEditingQuestion({
+                              ...adminEditingQuestion,
+                              correct_answer: e.target.value
+                            })}
+                            className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-750 font-extrabold focus:ring-2 focus:ring-indigo-500"
+                          />
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Question Content */}
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
+                        Question Statement Content (Supports exact LaTeX formulas e.g. $F = ma$)
+                      </label>
+                      <textarea
+                        rows={4}
+                        value={adminEditingQuestion.question_text}
+                        onChange={(e) => setAdminEditingQuestion({
+                          ...adminEditingQuestion,
+                          question_text: e.target.value
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-750 font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    {/* Multiple Choice Options */}
+                    {adminEditingQuestion.question_type === 'MCQ' && (
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-indigo-100 pt-3">
+                        <div className="col-span-full">
+                          <h5 className="font-extrabold text-xs text-indigo-950">Option Labels:</h5>
+                        </div>
+                        {(['A', 'B', 'C', 'D'] as const).map(opt => (
+                          <div key={opt} className="flex gap-2 items-center">
+                            <span className="font-black text-xs text-indigo-600 shrink-0 w-4">({opt})</span>
+                            <input
+                              type="text"
+                              value={adminEditingQuestion.options?.[opt] || ''}
+                              onChange={(e) => setAdminEditingQuestion({
+                                ...adminEditingQuestion,
+                                options: {
+                                  ...adminEditingQuestion.options || { A: '', B: '', C: '', D: '' },
+                                  [opt]: e.target.value
+                                }
+                              })}
+                              className="w-full bg-white border border-slate-200 rounded-lg py-1 px-2.5 text-xs text-slate-750"
+                            />
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Solutions text */}
+                    <div>
+                      <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
+                        Mathematical Solutions Explanation Text
+                      </label>
+                      <textarea
+                        rows={3}
+                        value={adminEditingQuestion.solution_text}
+                        onChange={(e) => setAdminEditingQuestion({
+                          ...adminEditingQuestion,
+                          solution_text: e.target.value
+                        })}
+                        className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-750 font-mono focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                      />
+                    </div>
+
+                    <div className="flex justify-end gap-2 border-t border-indigo-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() => setAdminEditingQuestion(null)}
+                        className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xxs font-black uppercase transition-colors cursor-pointer"
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        disabled={adminSavingId === adminEditingQuestion.id}
+                        onClick={() => handleUpdateQuestion(adminEditingQuestion)}
+                        className="px-3.5 py-1.5 bg-indigo-600 hover:bg-indigo-700 disabled:bg-slate-300 text-white rounded-lg text-xxs font-black uppercase tracking-wider transition-colors flex items-center gap-1.5 cursor-pointer"
+                      >
+                        {adminSavingId === adminEditingQuestion.id ? (
+                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin"></span>
+                        ) : (
+                          <Save className="w-3.5 h-3.5" />
+                        )}
+                        Save Changes
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {/* Question Library Database list */}
+                <div className="border border-slate-200 rounded-xl overflow-hidden bg-slate-50">
+                  <div className="bg-slate-100/70 p-3 font-extrabold text-[10px] uppercase tracking-wider text-slate-500 grid grid-cols-12 gap-2 border-b border-slate-200">
+                    <div className="col-span-1">ID</div>
+                    <div className="col-span-3">Details & Tags</div>
+                    <div className="col-span-6">Parsed Question Body</div>
+                    <div className="col-span-2 text-right">Actions</div>
+                  </div>
+
+                  {loadingAdminQuestions ? (
+                    <div className="text-center py-12">
+                      <div className="w-8 h-8 rounded-full border-2 border-indigo-500 border-t-transparent animate-spin mx-auto mb-2"></div>
+                      <span className="text-xxs text-slate-400 font-extrabold">Fetching complete Question Library...</span>
+                    </div>
+                  ) : (
+                    (() => {
+                      const filtered = adminQuestions.filter(q => {
+                        const matchesSub = adminSubjectFilter === 'ALL' || q.subject === adminSubjectFilter;
+                        const query = adminSearch.toLowerCase().trim();
+                        if (!query) return matchesSub;
+                        return (
+                          matchesSub && (
+                            q.question_text.toLowerCase().includes(query) ||
+                            (q.chapter && q.chapter.toLowerCase().includes(query)) ||
+                            (q.topic && q.topic.toLowerCase().includes(query)) ||
+                            q.id.toString() === query
+                          )
+                        );
+                      });
+
+                      if (filtered.length === 0) {
+                        return (
+                          <div className="text-center py-12 bg-white space-y-2">
+                            <Layers className="w-8 h-8 text-slate-200 mx-auto" />
+                            <p className="text-xs text-slate-450 font-extrabold">No questions found matching search criteria.</p>
+                            <p className="text-xxs text-slate-350">Try selecting a different subject context or clearing the query.</p>
+                          </div>
+                        );
+                      }
+
+                      return (
+                        <div className="divide-y divide-slate-150 max-h-[500px] overflow-y-auto scrollbar-thin bg-white">
+                          {filtered.map(q => {
+                            let badgeClass = 'bg-blue-50 text-blue-700 border-blue-100';
+                            if (q.subject === 'CHEMISTRY') badgeClass = 'bg-teal-50 text-teal-700 border-teal-100';
+                            if (q.subject === 'MATHEMATICS') badgeClass = 'bg-fuchsia-50 text-fuchsia-700 border-fuchsia-100';
+
+                            return (
+                              <div key={q.id} className="grid grid-cols-12 gap-2 p-3 items-start text-xs hover:bg-slate-50 transition-colors">
+                                <div className="col-span-1 font-mono font-bold text-slate-400 self-center">
+                                  #{q.id}
+                                </div>
+
+                                <div className="col-span-3 space-y-1">
+                                  <span className={`inline-block px-1.5 py-0.5 rounded border text-[8px] font-black uppercase ${badgeClass}`}>
+                                    {q.subject}
+                                  </span>
+                                  <span className="block font-black text-[10px] text-slate-750 line-clamp-2" title={q.chapter}>
+                                    {q.chapter}
+                                  </span>
+                                  <span className="block text-[8px] text-indigo-600 font-extrabold uppercase tracking-wide">
+                                    {q.topic}
+                                  </span>
+                                  <span className="inline-block px-1 bg-slate-100 text-slate-500 rounded text-[8px] font-black">
+                                    {q.question_type}
+                                  </span>
+                                </div>
+
+                                <div className="col-span-6 space-y-2 pr-3">
+                                  <div className="text-xxs text-slate-800 leading-normal bg-slate-50/50 p-2 rounded border border-slate-100 font-medium select-all">
+                                    {q.question_text.length > 300 ? q.question_text.slice(0, 300) + '...' : q.question_text}
+                                  </div>
+                                  
+                                  {q.options && (
+                                    <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px] text-slate-500 pl-1 font-semibold">
+                                      <div>A: <span className="text-slate-700">{q.options.A}</span></div>
+                                      <div>B: <span className="text-slate-700">{q.options.B}</span></div>
+                                      <div>C: <span className="text-slate-700">{q.options.C}</span></div>
+                                      <div>D: <span className="text-slate-700">{q.options.D}</span></div>
+                                    </div>
+                                  )}
+                                  
+                                  <div className="flex gap-2">
+                                    <span className="text-[9px] font-extrabold text-emerald-800 bg-emerald-50 border border-emerald-100 px-1.5 py-0.5 rounded">
+                                      Correct Answer: {q.correct_answer}
+                                    </span>
+                                  </div>
+                                </div>
+
+                                <div className="col-span-2 flex justify-end gap-1.5 self-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => setAdminEditingQuestion(q)}
+                                    className="p-1 px-2.5 bg-indigo-50 border border-indigo-150 text-indigo-700 rounded-lg hover:bg-indigo-100 transition-colors flex items-center gap-1 font-bold text-[9px] uppercase tracking-wider cursor-pointer"
+                                  >
+                                    <Edit className="w-3 h-3" /> Edit
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleDeleteQuestion(q.id)}
+                                    className="p-1 px-2 bg-rose-50 border border-rose-150 text-rose-700 hover:bg-rose-100 rounded-lg transition-colors flex items-center gap-1 font-bold text-[9px] uppercase tracking-wider cursor-pointer"
+                                  >
+                                    <Trash2 className="w-3 h-3" /> Del
+                                  </button>
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      );
+                    })()
+                  )}
+                </div>
+              </div>
+
+              {/* Creator-exclusive Student Database Records (Requested Tables) */}
+              <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-6">
+                <div className="flex flex-col sm:flex-row sm:items-center justify-between border-b border-slate-50 pb-3 gap-2">
+                  <div>
+                    <h3 className="font-extrabold text-slate-800 flex items-center gap-2 text-sm uppercase tracking-wide">
+                      <Layers className="text-indigo-600 w-4 h-4 animate-pulse" /> Student Registries & Performance Databases
+                    </h3>
+                    <p className="text-[10px] text-slate-400 mt-0.5">
+                      Relational structures containing logs of student activities, PINs, and simulated JEE score outputs.
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 flex-wrap shrink-0">
+                    <a
+                      href="/api/admin/download-db"
+                      download
+                      className="bg-indigo-600 hover:bg-indigo-700 text-white text-[10px] font-black px-3 py-1.5 rounded-lg uppercase tracking-wider flex items-center gap-1.5 shadow-sm transition-colors cursor-pointer"
+                    >
+                      <Download className="w-3.5 h-3.5" /> Download db.json Backup
+                    </a>
+                    <span className="bg-amber-100 text-amber-800 border border-amber-200 text-[10px] font-black px-2.5 py-1 rounded-md uppercase tracking-wider shrink-0">
+                      Admin Exclusive Console
+                    </span>
+                  </div>
+                </div>
+
+                {loadingAdminTables ? (
+                  <div className="flex items-center justify-center py-8 space-y-2 flex-col">
+                    <div className="w-6 h-6 border-2 border-indigo-600 border-t-transparent rounded-full animate-spin"></div>
+                    <span className="text-[10px] font-bold text-slate-400">Loading Student Registries...</span>
+                  </div>
+                ) : (
+                  <div className="space-y-6">
+                    {/* T1: Registered Student Login Logs */}
+                    <div className="space-y-2">
+                      <h4 className="text-[11px] font-extrabold text-indigo-950 flex items-center justify-between uppercase tracking-wider bg-slate-50 p-2.5 rounded-lg border border-slate-150">
+                        <span className="flex items-center gap-1.5"><User className="w-3.5 h-3.5 text-indigo-600" /> Database Table 1: Registered Candidates (Login log)</span>
+                        <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-mono lowercase">{adminUsers.length} entries</span>
+                      </h4>
+                      <div className="overflow-x-auto border border-slate-150 rounded-lg">
+                        <table className="w-full text-slate-650 text-[11px] text-left border-collapse">
+                          <thead className="bg-slate-100/80 font-extrabold text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-150">
+                            <tr>
+                              <th className="px-3 py-2">UID / Candidate ID</th>
+                              <th className="px-3 py-2">Candidate Info</th>
+                              <th className="px-3 py-2">DOB</th>
+                              <th className="px-3 py-2">Bypass PIN</th>
+                              <th className="px-3 py-2 text-center">Logins Count</th>
+                              <th className="px-3 py-2 text-right">Avg Session Duration</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {adminUsers.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="text-center py-4 text-slate-400 font-medium">No students registered in the database yet.</td>
+                              </tr>
+                            ) : (
+                              adminUsers.map(user => {
+                                const avgSec = user.number_of_logins > 0 
+                                  ? Math.round((user.total_login_duration_seconds || 0) / user.number_of_logins) 
+                                  : 0;
+                                const hrs = Math.floor(avgSec / 3600);
+                                const mins = Math.floor((avgSec % 3600) / 60);
+                                const secs = avgSec % 60;
+                                const durationFormatted = hrs > 0 
+                                  ? `${hrs}h ${mins}m` 
+                                  : mins > 0 
+                                    ? `${mins}m ${secs}s` 
+                                    : `${secs}s`;
+
+                                return (
+                                  <tr key={user.id} className="hover:bg-slate-50/55 transition-colors">
+                                    <td className="px-3 py-2 font-mono font-bold text-indigo-600 text-[10px] whitespace-nowrap">
+                                      {user.candidate_id || `CAND-${user.id}`}
+                                    </td>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                      <span className="font-extrabold text-slate-800 block text-xs">{user.username}</span>
+                                      <span className="text-[10px] text-slate-500 block">{user.email_id} • {user.mobile_number}</span>
+                                    </td>
+                                    <td className="px-3 py-2 font-semibold text-slate-750 whitespace-nowrap">{user.dob || '15-05-2006'}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                      <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 font-bold">{user.password || '123456'}</span>
+                                    </td>
+                                    <td className="px-3 py-2 text-center font-bold text-slate-800">{user.number_of_logins || 1}</td>
+                                    <td className="px-3 py-2 text-right font-semibold text-slate-700 font-mono whitespace-nowrap">{durationFormatted}</td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+
+                    {/* T2: JEE Mock Candidate Performance Records */}
+                    <div className="space-y-2">
+                      <h4 className="text-[11px] font-extrabold text-indigo-950 flex items-center justify-between uppercase tracking-wider bg-slate-50 p-2.5 rounded-lg border border-slate-150">
+                        <span className="flex items-center gap-1.5"><Award className="w-3.5 h-3.5 text-indigo-600" /> Database Table 2: Simulated Test Performance Records (Exam analytics)</span>
+                        <span className="text-[10px] bg-indigo-100 text-indigo-800 px-2 py-0.5 rounded-full font-mono lowercase">{adminAttempts.length} entries</span>
+                      </h4>
+                      <div className="overflow-x-auto border border-slate-150 rounded-lg">
+                        <table className="w-full text-slate-650 text-[11px] text-left border-collapse">
+                          <thead className="bg-slate-100/80 font-extrabold text-slate-700 uppercase text-[9px] tracking-wider border-b border-slate-150">
+                            <tr>
+                              <th className="px-3 py-2">Test ID</th>
+                              <th className="px-3 py-2">Candidate Info</th>
+                              <th className="px-3 py-2">Date & Time</th>
+                              <th className="px-3 py-2">Syllabus Coverage</th>
+                              <th className="px-3 py-2 text-center">Score achieved</th>
+                              <th className="px-3 py-2 text-right">Extrapolated Percentile</th>
+                            </tr>
+                          </thead>
+                          <tbody className="divide-y divide-slate-100">
+                            {adminAttempts.length === 0 ? (
+                              <tr>
+                                <td colSpan={6} className="text-center py-4 text-slate-400 font-medium">No test results submitted by candidates yet.</td>
+                              </tr>
+                            ) : (
+                              [...adminAttempts].reverse().map(att => {
+                                const chapsLabel = att.syllabus_chapters?.length > 0 
+                                  ? `${att.syllabus_chapters.length} chapters selected` 
+                                  : 'All Syllabus';
+                                
+                                return (
+                                  <tr key={att.id} className="hover:bg-slate-50/55 transition-colors">
+                                    <td className="px-3 py-2 font-mono font-bold text-slate-400 text-[10px] whitespace-nowrap">#T-00{att.id}</td>
+                                    <td className="px-3 py-2 whitespace-nowrap">
+                                      <span className="font-extrabold text-slate-800 block text-xs">{att.candidate_name}</span>
+                                      <span className="text-[9px] text-indigo-650 font-extrabold font-mono uppercase tracking-wider">{att.candidate_id}</span>
+                                    </td>
+                                    <td className="px-3 py-2 whitespace-nowrap font-medium text-slate-500">
+                                      {new Date(att.attempted_at).toLocaleDateString()} {new Date(att.attempted_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                                    </td>
+                                    <td className="px-3 py-2 max-w-[200px] truncate" title={att.syllabus_chapters?.join(', ')}>
+                                      <span className="font-semibold text-slate-700">{chapsLabel}</span>
+                                    </td>
+                                    <td className="px-3 py-2 text-center whitespace-nowrap">
+                                      <span className="bg-indigo-50 text-indigo-800 border border-indigo-200 rounded px-2 py-0.5 font-bold font-mono">
+                                        {att.total_score} marks
+                                      </span>
+                                    </td>
+                                    <td className="px-3 py-2 text-right whitespace-nowrap font-bold text-[10px] font-mono">
+                                      <div className="font-semibold text-emerald-850">Jan: {formatPercentileRange(att.percentile_jan).replace(' %ile', '')}</div>
+                                      <div className="font-semibold text-teal-850">Apr: {formatPercentileRange(att.percentile_april).replace(' %ile', '')}</div>
+                                    </td>
+                                  </tr>
+                                );
+                              })
+                            )}
+                          </tbody>
+                        </table>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Reset Database Cleanly Banner at the Bottom */}
+              <div className="space-y-3">
+                {wipeStatusMessage && (
+                  <div className={`p-4 rounded-xl border text-xs font-semibold animate-pulse shadow-sm ${
+                    wipeStatusMessage.startsWith('success:') 
+                      ? 'bg-emerald-50 border-emerald-200 text-emerald-900' 
+                      : 'bg-rose-50 border-rose-200 text-rose-900'
+                  }`}>
+                    {wipeStatusMessage.replace(/^(success|error):\s*/, '')}
+                  </div>
+                )}
+
+                <div className={`border rounded-xl p-5 flex flex-col gap-4 transition-all duration-300 ${
+                  wipeState === 'idle' 
+                    ? 'bg-rose-50/70 border-rose-200' 
+                    : wipeState === 'warning1' 
+                      ? 'bg-amber-50 border-amber-300 shadow-md ring-1 ring-amber-400' 
+                      : 'bg-rose-950/95 border-rose-600 shadow-xl text-white ring-2 ring-rose-500 animate-pulse'
+                }`}>
+                  {wipeState === 'idle' && (
+                    <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-3">
+                      <div className="space-y-1">
+                        <h5 className="font-extrabold text-xs text-rose-950 flex items-center gap-1.5 uppercase tracking-wide">
+                          <Trash2 className="w-4 h-4 text-rose-650" /> Database Reset & Preparation Zone
+                        </h5>
+                        <p className="text-xxs leading-normal max-w-xl text-rose-750">
+                          To restart the parsing lifecycle completely clear of any previous tagging or doubled questions, click the button to wipe the library. This will instantly reset all syllabus topic/subcategory active question counts to 0.
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => {
+                          setWipeState('warning1');
+                          setWipeStatusMessage(null);
+                        }}
+                        type="button"
+                        className="shrink-0 bg-rose-600 hover:bg-rose-700 text-white font-black px-4 py-2.5 rounded-lg text-xxs uppercase tracking-wider transition-colors shadow-sm cursor-pointer"
+                      >
+                        Wipe Database Options
+                      </button>
+                    </div>
+                  )}
+
+                  {wipeState === 'warning1' && (
+                    <div className="space-y-4">
+                      <div className="space-y-1">
+                        <h5 className="font-extrabold text-xs text-amber-950 flex items-center gap-1.5 uppercase tracking-wide">
+                          <AlertTriangle className="w-4 h-4 text-amber-600 animate-bounce" /> Database Modification: Choice of Action
+                        </h5>
+                        <p className="text-xxs leading-normal text-amber-900 font-semibold">
+                          Please select how you would like to proceed with the database reset. You can either cleanly remove only your most recent upload session or wipe out all questions completely.
+                        </p>
+                      </div>
+
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
+                        {/* Option 1 */}
+                        <div className="border border-amber-250 bg-white/70 p-3 rounded-lg flex flex-col justify-between items-start gap-2.5">
+                          <div>
+                            <span className="bg-amber-100 text-amber-800 text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wider border border-amber-200">
+                              Option 1
+                            </span>
+                            <h6 className="font-extrabold text-xs text-slate-800 mt-1.5 uppercase tracking-wide">Delete Last Upload Only</h6>
+                            <p className="text-[10px] text-slate-500 mt-0.5 leading-relaxed">
+                              Safely deletes only those questions that were uploaded can parsed in your very last PDF parser run, preserving all previous batches.
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => handleClearQuestions('last_batch')}
+                            type="button"
+                            className="bg-amber-600 hover:bg-amber-700 text-white font-extrabold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded transition-colors self-end"
+                          >
+                            Execute Option 1
+                          </button>
+                        </div>
+
+                        {/* Option 2 */}
+                        <div className="border border-rose-200 bg-rose-50/40 p-3 rounded-lg flex flex-col justify-between items-start gap-2.5">
+                          <div>
+                            <span className="bg-rose-100 text-rose-800 text-[9px] font-black uppercase px-2 py-0.5 rounded tracking-wider border border-rose-200">
+                              Option 2
+                            </span>
+                            <h6 className="font-extrabold text-xs text-rose-950 mt-1.5 uppercase tracking-wide">Delete Everything (Entire DB)</h6>
+                            <p className="text-[10px] text-slate-600 mt-0.5 leading-relaxed font-medium">
+                              Clears the entire active questions repository and resets category counters back to zero. This will require another confirmation warning step.
+                            </p>
+                          </div>
+                          <button
+                            onClick={() => setWipeState('confirm_all')}
+                            type="button"
+                            className="bg-rose-605 bg-rose-600 hover:bg-rose-750 text-white font-extrabold text-[10px] uppercase tracking-wider px-3 py-1.5 rounded transition-colors self-end"
+                          >
+                            Review Option 2
+                          </button>
+                        </div>
+                      </div>
+
+                      <div className="flex justify-end pt-2 border-t border-amber-200/50">
+                        <button
+                          onClick={() => setWipeState('idle')}
+                          type="button"
+                          className="bg-slate-700 hover:bg-slate-650 text-white font-bold px-3 py-1.5 rounded text-xxs uppercase tracking-wider transition-colors cursor-pointer"
+                        >
+                          Cancel / Back
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {wipeState === 'confirm_all' && (
+                    <div className="space-y-4">
+                      <div className="space-y-2">
+                        <h5 className="font-extrabold text-xs text-rose-200 flex items-center gap-1.5 uppercase tracking-widest text-shadow">
+                          <Trash2 className="w-5 h-5 text-rose-450 animate-bounce" /> CRITICAL SYSTEM OVERWRITE CONFIRMATION (STEP 2 OF 2)
+                        </h5>
+                        <p className="text-xxs leading-relaxed font-bold text-rose-100 bg-rose-950 border border-rose-800 p-3 rounded-lg">
+                          DANGER: Are you absolutely certain you want to wipe ALL questions from the relational database? This action is immediate, irreversible, and CANNOT be undone. All active syllabus taxonomy counts and performance records will instantly reset to 0.
+                        </p>
+                      </div>
+
+                      <div className="flex flex-wrap gap-2.5 justify-end pt-2 border-t border-rose-800/50">
+                        <button
+                          onClick={() => setWipeState('warning1')}
+                          type="button"
+                          className="bg-slate-800 hover:bg-slate-700 border border-slate-700 text-rose-200 font-extrabold px-3 py-2 rounded text-xxs uppercase tracking-wider transition-colors cursor-pointer"
+                        >
+                          Cancel / Back
+                        </button>
+                        <button
+                          onClick={() => handleClearQuestions('all')}
+                          type="button"
+                          className="bg-rose-600 hover:bg-rose-500 text-white font-black px-4 py-2 rounded text-xxs uppercase tracking-widest transition-colors shadow-lg cursor-pointer animate-pulse border border-rose-400"
+                        >
+                          Wipe Database Cleanly
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </main>
+    </div>
+  );
+}
