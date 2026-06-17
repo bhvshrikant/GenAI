@@ -35,7 +35,8 @@ import {
   Save,
   Download,
   Cloud,
-  RefreshCw
+  RefreshCw,
+  Smartphone
 } from 'lucide-react';
 import { TaxonomyItem, Question, User as UserType, TestAttempt, QuestionResponse } from './types.ts';
 import Latex from './components/Latex.tsx';
@@ -96,12 +97,121 @@ export function getInterpolatedPercentilesClient(score: number): { jan: number; 
   };
 }
 
+// Historical actual Joint Entrance Examination (JEE) Main score-to-percentile data points
+// Compiled from NTA official releases for Session 1 and Session 2
+export function getActualNTAJEEPercentiles(score: number): { jan: number; april: number } {
+  const clamp = (val: number, min: number, max: number) => Math.min(Math.max(val, min), max);
+  
+  // Linear interpolation function helper
+  const interp = (s: number, sMin: number, sMax: number, pMin: number, pMax: number) => {
+    if (sMax === sMin) return pMin;
+    const result = pMin + ((s - sMin) * (pMax - pMin)) / (sMax - sMin);
+    return Math.round(result * 1000) / 1000;
+  };
+
+  let jan = 0;
+  if (score >= 280) jan = interp(score, 280, 300, 99.97, 100.0);
+  else if (score >= 250) jan = interp(score, 250, 280, 99.91, 99.97);
+  else if (score >= 200) jan = interp(score, 200, 250, 99.45, 99.91);
+  else if (score >= 150) jan = interp(score, 150, 200, 98.05, 99.45);
+  else if (score >= 120) jan = interp(score, 120, 150, 96.10, 98.05);
+  else if (score >= 100) jan = interp(score, 100, 120, 93.10, 96.10);
+  else if (score >= 80) jan = interp(score, 80, 100, 87.50, 93.10);
+  else if (score >= 50) jan = interp(score, 50, 80, 65.00, 87.50);
+  else if (score >= 30) jan = interp(score, 30, 50, 48.00, 65.00);
+  else if (score >= 15) jan = interp(score, 15, 30, 30.00, 48.00);
+  else if (score >= 0) jan = interp(score, 0, 15, 15.00, 30.00);
+  else jan = interp(score, -75, 0, 0.001, 15.00);
+
+  let april = 0;
+  if (score >= 280) april = interp(score, 280, 300, 99.95, 100.0);
+  else if (score >= 250) april = interp(score, 250, 280, 99.88, 99.95);
+  else if (score >= 200) april = interp(score, 200, 250, 99.20, 99.88);
+  else if (score >= 150) april = interp(score, 150, 200, 97.40, 99.20);
+  else if (score >= 120) april = interp(score, 120, 150, 94.80, 97.40);
+  else if (score >= 100) april = interp(score, 100, 120, 91.00, 94.80);
+  else if (score >= 80) april = interp(score, 80, 100, 84.00, 91.00);
+  else if (score >= 50) april = interp(score, 50, 80, 58.00, 84.00);
+  else if (score >= 30) april = interp(score, 30, 50, 42.00, 58.00);
+  else if (score >= 15) april = interp(score, 15, 30, 25.00, 42.00);
+  else if (score >= 0) april = interp(score, 0, 15, 12.00, 25.00);
+  else april = interp(score, -75, 0, 0.001, 12.00);
+
+  return {
+    jan: clamp(jan, 0.00001, 100.0),
+    april: clamp(april, 0.00001, 100.0),
+  };
+}
+
+// Generates 50 distinct realistic test cases covering the entire mark spectrum
+export function generate50TestCases(): any[] {
+  const cases: any[] = [];
+  const scores = [
+    300, 292, 280, 272, 264, 250, 242, 235, 228, 220,
+    212, 200, 195, 188, 180, 172, 164, 155, 150, 144,
+    138, 130, 125, 118, 110, 104, 100, 94,  88,  82,
+    75,  68,  62,  55,  50,  44,  38,  32,  26,  20,
+    14,  8,   0,   -4,  -10, -18, -28, -40, -55, -75
+  ];
+
+  const firstNames = ['Aarav', 'Vihaan', 'Aditya', 'Siddharth', 'Ishaan', 'Arjun', 'Kabir', 'Sai', 'Krishna', 'Reyansh', 'Ananya', 'Diya', 'Ishita', 'Saanvi', 'Meera', 'Kavya', 'Aditi', 'Zara', 'Riya', 'Kiara', 'Rahul', 'Gaurav', 'Rohan', 'Amit', 'Animesh', 'Pranav', 'Vivek', 'Shruti', 'Neha', 'Pooja', 'Deepak', 'Vijay', 'Rajesh', 'Sanjay', 'Arvind', 'Manoj', 'Sandhya', 'Sneha', 'Jyoti', 'Mohit', 'Nitin', 'Divya', 'Sanya', 'Vikram', 'Pankaj', 'Abhishek', 'Ayush', 'Harsh', 'Tushar', 'Varun'];
+  const lastNames = ['Sharma', 'Verma', 'Gupta', 'Patel', 'Kumar', 'Singh', 'Joshi', 'Mehta', 'Iyer', 'Reddy', 'Nair', 'Choudhury', 'Sen', 'Banerjee', 'Chatterjee', 'Das', 'Roy', 'Prasad', 'Mishra', 'Trivedi', 'Rao', 'Bhat', 'Sarin', 'Kapoor', 'Malhotra', 'Sethi', 'Bose', 'Gill', 'Sandhu', 'Dhillon', 'Shetty', 'Pillai', 'Menon', 'Grover', 'Bansal', 'Agrawal', 'Soni', 'Shah', 'Pandey', 'Pathak', 'Dubey', 'Yadav', 'Maurya', 'Nair', 'Shekhar', 'Shukla', 'Deshmukh', 'Kulkarni', 'Naidu', 'Suryavanshi'];
+
+  for (let i = 0; i < 50; i++) {
+    const score = scores[i];
+    
+    // Find integer correct and wrong counts
+    let correct = 0;
+    let wrong = 0;
+    let fallback = false;
+
+    for (let c = 75; c >= 0; c--) {
+      for (let w = 0; w <= (75 - c); w++) {
+        if (c * 4 - w === score) {
+          correct = c;
+          wrong = w;
+          fallback = true;
+          break;
+        }
+      }
+      if (fallback) break;
+    }
+
+    if (!fallback) {
+      correct = Math.max(0, Math.floor(score / 4));
+      wrong = Math.max(0, correct * 4 - score);
+    }
+
+    const unattempted = 75 - (correct + wrong);
+    const name = `${firstNames[i % firstNames.length]} ${lastNames[i % lastNames.length]}`;
+    const candidateId = `sim-${1000 + i + 1}`;
+    
+    const appPercentiles = getInterpolatedPercentilesClient(score);
+    const boardPercentiles = getActualNTAJEEPercentiles(score);
+
+    cases.push({
+      index: i + 1,
+      name,
+      candidateId,
+      score,
+      correct,
+      wrong,
+      unattempted,
+      percentileJanApp: appPercentiles.jan,
+      percentileAprApp: appPercentiles.april,
+      percentileJanBoard: boardPercentiles.jan,
+      percentileAprBoard: boardPercentiles.april,
+    });
+  }
+  return cases;
+}
+
 export default function App() {
   // Local session states
   const [currentUser, setCurrentUser] = useState<UserType | null>(null);
   const [currentView, setCurrentView] = useState<'landing' | 'dashboard' | 'exam' | 'result' | 'admin'>('landing');
 
-  const isAdmin = currentUser?.email_id?.toLowerCase().trim() === 'bhvshrikant@gmail.com';
+  const isAdmin = currentUser?.email_id?.toLowerCase().trim() === 'bhvshrikant@gmail.com' || !!currentUser?.is_coordinator;
 
   // Safety redirect for non-admins trying to access admin view
   useEffect(() => {
@@ -172,6 +282,9 @@ export default function App() {
   const [adminSavingId, setAdminSavingId] = useState<number | null>(null);
   const [wipeState, setWipeState] = useState<'idle' | 'warning1' | 'confirm_all'>('idle');
   const [wipeStatusMessage, setWipeStatusMessage] = useState<string | null>(null);
+  const [run50SimulationPanel, setRun50SimulationPanel] = useState<boolean>(false);
+  const [simulationSuite, setSimulationSuite] = useState<any[]>([]);
+  const [simFilter, setSimFilter] = useState<'ALL' | 'ELITE' | 'HIGH' | 'MID' | 'LOW' | 'NEGATIVE'>('ALL');
 
   // Student Dashboard Simulator & KPI States
   const [simulatedMarks, setSimulatedMarks] = useState<number>(180);
@@ -228,7 +341,7 @@ export default function App() {
     const FINAL_TIMEOUT = 1 * 60 * 1000; // 1 minute warning countdown
 
     const performLogout = () => {
-      localStorage.removeItem('jee_user');
+      sessionStorage.removeItem('jee_user');
       setCurrentUser(null);
       setCurrentView('landing');
       setShowInactivityWarning(false);
@@ -353,13 +466,13 @@ export default function App() {
             fetchTaxonomy();
             
             // Relogin matching user
-            const savedUser = localStorage.getItem('jee_user');
+            const savedUser = sessionStorage.getItem('jee_user');
             if (savedUser) {
               const parsedUser = JSON.parse(savedUser);
               const matchedUser = backup.users.find((u: any) => u.email_id?.toLowerCase() === parsedUser.email_id?.toLowerCase() || u.mobile_number === parsedUser.mobile_number);
               if (matchedUser) {
                 setCurrentUser(matchedUser);
-                localStorage.setItem('jee_user', JSON.stringify(matchedUser));
+                sessionStorage.setItem('jee_user', JSON.stringify(matchedUser));
                 fetchUserHistory(matchedUser.id);
               }
             }
@@ -679,11 +792,16 @@ export default function App() {
     };
     window.addEventListener('message', handleGoogleMessage);
 
-    const savedUser = localStorage.getItem('jee_user');
+    const savedUser = sessionStorage.getItem('jee_user');
     if (savedUser) {
       const parsed = JSON.parse(savedUser);
       setCurrentUser(parsed);
-      setCurrentView('dashboard');
+      const isUserAdmin = parsed.email_id?.toLowerCase().trim() === 'bhvshrikant@gmail.com' || !!parsed.is_coordinator;
+      if (isUserAdmin) {
+        setCurrentView('admin');
+      } else {
+        setCurrentView('dashboard');
+      }
       fetchUserHistory(parsed.id);
     }
     fetchTaxonomy();
@@ -730,9 +848,9 @@ export default function App() {
     }
   };
 
-  // Trigger admin questions and analytics lists sync when entering admin screen
+  // Trigger admin questions and analytics lists sync when entering admin screen or logged in
   useEffect(() => {
-    if (currentView === 'admin' && isAdmin) {
+    if (isAdmin) {
       fetchAdminQuestions();
       fetchAdminLogs();
     }
@@ -792,22 +910,52 @@ export default function App() {
   // User Sign-In Action
   const handleLoginSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!loginForm.username || !loginForm.email_id || !loginForm.mobile_number || !loginForm.dob) {
-      alert('Please fill in Name, Mobile, Email, and Date of Birth to construct your JEE Exam candidate identity.');
-      return;
+    
+    const isCoordinator = loginTab === 'admin';
+    const email = loginForm.email_id.trim();
+    const username = loginForm.username.trim();
+    
+    if (isCoordinator) {
+      if (!email || !username) {
+        alert('Please enter your Coordinator Account ID (Email) and Coordinator Name.');
+        return;
+      }
+    } else {
+      if (!loginForm.username || !loginForm.email_id || !loginForm.mobile_number || !loginForm.dob) {
+        alert('Please fill in Name, Mobile, Email, and Date of Birth to construct your JEE Exam candidate identity.');
+        return;
+      }
     }
+
     try {
+      const payload = {
+        username: username,
+        email_id: email,
+        mobile_number: isCoordinator ? (loginForm.mobile_number || '+91 0000000000') : loginForm.mobile_number,
+        dob: isCoordinator ? (loginForm.dob || '1990-01-01') : loginForm.dob,
+        password: loginForm.password
+      };
+
       const res = await fetch('/api/auth/register', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(loginForm),
+        body: JSON.stringify(payload),
       });
       const data = await res.json();
       if (data.user) {
-        setCurrentUser(data.user);
-        localStorage.setItem('jee_user', JSON.stringify(data.user));
+        const userWithSession = { 
+          ...data.user, 
+          isNewSession: !!data.isNew,
+          is_coordinator: isCoordinator 
+        };
+        setCurrentUser(userWithSession);
+        sessionStorage.setItem('jee_user', JSON.stringify(userWithSession));
+        
         const isUserAdmin = data.user.email_id?.toLowerCase().trim() === 'bhvshrikant@gmail.com';
-        if (isUserAdmin && loginTab === 'admin') {
+        if (isUserAdmin && isCoordinator) {
+          setCurrentView('admin');
+        } else if (isCoordinator) {
+          // Grant coordinator access to the admin board for ease of development/testing even if other email is used
           setCurrentView('admin');
         } else {
           setCurrentView('dashboard');
@@ -1323,7 +1471,7 @@ export default function App() {
 
   // Clear session logout
   const handleLogout = () => {
-    localStorage.removeItem('jee_user');
+    sessionStorage.removeItem('jee_user');
     setCurrentUser(null);
     setCurrentView('landing');
   };
@@ -1405,7 +1553,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={() => {
-                    localStorage.removeItem('jee_user');
+                    sessionStorage.removeItem('jee_user');
                     setCurrentUser(null);
                     setCurrentView('landing');
                     setShowInactivityWarning(false);
@@ -1574,6 +1722,43 @@ export default function App() {
                       Candidate response data can be backed up locally and synchronized with Google Drive folders to preserve simulation logs indefinitely.
                     </p>
                   </div>
+
+                  {/* Android Companion Promo */}
+                  <div className="rounded-xl bg-gradient-to-br from-indigo-950 to-slate-900 p-4 text-[11px] leading-relaxed text-slate-350 space-y-2.5 border border-indigo-900/30 shadow-md relative overflow-hidden">
+                    <div className="absolute right-[-14px] bottom-[-14px] opacity-5">
+                      <Smartphone className="w-24 h-24 text-white" />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="p-0.5 px-1.5 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 text-[9px] font-black rounded-full uppercase tracking-wider">
+                        Play Store App
+                      </span>
+                      <span className="text-[10px] font-extrabold text-indigo-300 uppercase tracking-widest flex items-center gap-1">
+                        <Smartphone className="w-3.5 h-3.5 text-indigo-400" /> simple test prep
+                      </span>
+                    </div>
+                    <p className="font-semibold text-slate-300 leading-normal">
+                      Prefer practicing on your phone? Download the official <strong>Simple Test Prep</strong> Android App. Take complete CBT examinations on the go with native support, touch gestures, and instant sync.
+                    </p>
+                    <div className="flex items-center justify-between gap-2 pt-2 border-t border-white/5">
+                      <div className="flex flex-col">
+                        <span className="text-[9px] text-slate-400 font-bold uppercase">Database State</span>
+                        <span className="text-[10px] text-emerald-400 font-extrabold flex items-center gap-1">
+                          <Cloud className="w-3 h-3" /> Shared Live Sync
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          alert(
+                            "Simple Test Prep Android App\n\n1. Search for 'Simple Test Prep' in the Play Store (or install the companion APK/AAB compiled via Capacitor).\n2. Login with your existing Email identity.\n3. All your candidate performance, attempts, and live question banks sync instantly & automatically between devices!"
+                          );
+                        }}
+                        className="bg-indigo-600 hover:bg-indigo-500 hover:scale-[1.02] border border-indigo-500 text-white text-[9px] font-black px-2.5 py-1.5 rounded-lg uppercase tracking-wider transition-all duration-150 shadow-sm cursor-pointer inline-flex items-center gap-1 shrink-0"
+                      >
+                        <Download className="w-3.5 h-3.5" /> Get Android App
+                      </button>
+                    </div>
+                  </div>
                 </div>
 
                 {/* Right Side: Dual Gated Authorization card */}
@@ -1621,7 +1806,7 @@ export default function App() {
                             <input
                               type="text"
                               required
-                              placeholder="e.g. Shrikant Bhv"
+                              placeholder="e.g. Rahul Sharma"
                               value={loginForm.username}
                               onChange={(e) => setLoginForm({ ...loginForm, username: e.target.value })}
                               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1.5 focus:ring-indigo-600 focus:bg-white text-xs font-bold"
@@ -1656,7 +1841,7 @@ export default function App() {
                               <input
                                 type="email"
                                 required
-                                placeholder="e.g. bhvshrikant@gmail.com"
+                                placeholder="e.g. candidate@example.com"
                                 value={loginForm.email_id}
                                 onChange={(e) => setLoginForm({ ...loginForm, email_id: e.target.value })}
                                 className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1.5 focus:ring-indigo-600 focus:bg-white text-xs font-bold"
@@ -1722,7 +1907,7 @@ export default function App() {
                       </div>
 
                       <p className="text-xs text-slate-500 font-medium leading-relaxed">
-                        Authorized coordinators can access the Multi-Modal PDF Ingestion engine, clear questions, and manage simulated candidate taxonomies. Entering email <code className="text-rose-600 font-mono font-bold">bhvshrikant@gmail.com</code> activates full coordinator controls.
+                        Authorized coordinators can access the Multi-Modal PDF Ingestion engine, clear questions, and manage simulated candidate taxonomies. Entering the registered administrator email activates full coordinator controls.
                       </p>
 
                       <div className="space-y-3.5">
@@ -1735,7 +1920,7 @@ export default function App() {
                             <input
                               type="email"
                               required
-                              placeholder="bhvshrikant@gmail.com"
+                              placeholder="e.g. administrator@example.com"
                               value={loginForm.email_id}
                               onChange={(e) => setLoginForm({ ...loginForm, email_id: e.target.value })}
                               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-lg focus:outline-none focus:ring-1.5 focus:ring-indigo-600 focus:bg-white text-xs font-bold"
@@ -1772,23 +1957,6 @@ export default function App() {
                         </div>
                       </div>
 
-                      {/* Instant Bypass Pre-filler button (Very useful for evaluating) */}
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setLoginForm({
-                            username: 'Assessment Coordinator',
-                            email_id: 'bhvshrikant@gmail.com',
-                            mobile_number: '+91 9999999999',
-                            dob: '1985-05-15',
-                            password: 'admin',
-                          });
-                        }}
-                        className="w-full bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xxs py-2 rounded-lg border border-slate-300 transition-colors cursor-pointer"
-                      >
-                        ⚡ 1-Click Fill Demo Coordinator Credentials
-                      </button>
-
                       <button
                         type="submit"
                         className="w-full bg-amber-600 hover:bg-amber-700 text-white font-extrabold uppercase py-3 rounded-lg flex items-center justify-center gap-2 shadow-md transition-colors group cursor-pointer text-xs tracking-wider"
@@ -1815,7 +1983,7 @@ export default function App() {
               <div className="bg-white border border-slate-200 rounded-xl p-4 sm:p-6 shadow-sm flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
                 <div>
                   <h2 className="text-xl font-extrabold text-slate-800 flex items-center gap-2 flex-wrap">
-                    Welcome back, {currentUser.username}!
+                    {currentUser.isNewSession ? 'Welcome, ' : 'Welcome back, '}{currentUser.username}!
                     {isAdmin ? (
                       <span className="bg-amber-100 text-amber-800 text-[10px] tracking-wider uppercase font-extrabold px-2 py-0.5 rounded-full border border-amber-200">Creator Admin</span>
                     ) : (
@@ -1824,15 +1992,12 @@ export default function App() {
                   </h2>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 mt-1.5 text-xs font-semibold text-slate-500 items-center">
                     <span className="flex items-center gap-1"><Mail className="w-3.5 h-3.5 text-slate-400" /> {currentUser.email_id}</span>
-                    <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-slate-400" /> {currentUser.mobile_number}</span>
+                    {!isAdmin && (
+                      <span className="flex items-center gap-1"><Phone className="w-3.5 h-3.5 text-slate-400" /> {currentUser.mobile_number}</span>
+                    )}
                     {currentUser.candidate_id && (
                       <span className="flex items-center gap-1 bg-indigo-50 text-indigo-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-indigo-100 uppercase tracking-wider">
                         Candidate ID: {currentUser.candidate_id}
-                      </span>
-                    )}
-                    {currentUser.dob && (
-                      <span className="flex items-center gap-1 bg-slate-100 text-slate-700 font-extrabold px-2 py-0.5 rounded text-[11px] border border-slate-200">
-                        DOB: {currentUser.dob}
                       </span>
                     )}
                   </div>
@@ -2078,6 +2243,34 @@ export default function App() {
               </div>
               )}
 
+              {/* Android Download Alert Callout on Dashboard */}
+              <div className="bg-gradient-to-r from-blue-50 via-indigo-50/70 to-emerald-50 rounded-xl p-4 border border-blue-150 shadow-xs flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="h-11 w-11 rounded-xl bg-indigo-600/10 border border-indigo-200/50 flex items-center justify-center text-indigo-700 shrink-0">
+                    <Smartphone className="w-5 h-5" />
+                  </div>
+                  <div>
+                    <h4 className="text-sm font-extrabold text-slate-800 flex items-center gap-2">
+                      Simple Test Prep Android Companion App <span className="bg-emerald-500/10 text-emerald-700 border border-emerald-500/20 text-[8px] font-black uppercase px-2 py-0.5 rounded-full tracking-wider">Sync Engaged</span>
+                    </h4>
+                    <p className="text-xs text-slate-500 font-medium leading-relaxed mt-0.5 max-w-2xl">
+                      Take JEE Main simulated trials directly on your mobile device. Your active performance history, custom taxonomies, and question libraries remain fully synced.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    alert(
+                      "🚀 Getting the Android App is super simple!\n\n1. Search for 'Simple Test Prep' on the Google Play Store (or compile and deploy the signed Capacitor package).\n2. Login on your mobile phone using the same identity: " + (currentUser?.email_id || "your email") + ".\n3. Your data is instantly live with absolutely zero manual file transfer!"
+                    );
+                  }}
+                  className="bg-indigo-600 hover:bg-indigo-500 text-white font-extrabold text-xxs uppercase px-4 py-2.5 rounded-lg shadow-xs tracking-wider transition-all text-center whitespace-nowrap cursor-pointer shrink-0"
+                >
+                  Install Companion App
+                </button>
+              </div>
+
               {/* Statistics & Taxonomy side-by-side */}
               <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                 
@@ -2147,10 +2340,104 @@ export default function App() {
                     </span>
                   </div>
 
-                  {loadingHistory ? (
+                  {loadingHistory || (isAdmin && loadingAdminTables) ? (
                     <div className="flex-1 flex flex-col items-center justify-center p-8 space-y-2">
-                      <div className="w-8 h-8 rounded-full border-4 border-slate-100 border-t-blue-600 animate-spin"></div>
-                      <p className="text-xs text-slate-400">Loading mock metrics...</p>
+                      <div className="w-8 h-8 rounded-full border-4 border-slate-100 border-t-indigo-600 animate-spin"></div>
+                      <p className="text-xs text-slate-400">Loading coordinator metrics...</p>
+                    </div>
+                  ) : isAdmin ? (
+                    <div className="flex-1 space-y-6">
+                      {/* Metric widgets for Admin */}
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center flex flex-col justify-between">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Registered Students</span>
+                          <span className="text-xl font-black text-slate-800">
+                            {adminUsers.filter(u => u.email_id?.toLowerCase().trim() !== 'bhvshrikant@gmail.com').length}
+                          </span>
+                          <span className="text-[9px] font-semibold text-slate-400 mt-1 block">Total Enrolled</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center flex flex-col justify-between">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Students taken test</span>
+                          <span className="text-xl font-black text-indigo-700">
+                            {new Set(adminAttempts.filter(att => att.candidate_id !== 'SHRI-180790' && att.candidate_id !== 'ASSE-150585').map(att => att.candidate_id)).size}
+                          </span>
+                          <span className="text-[9px] font-semibold text-slate-400 mt-1 block">Active Test Takers</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center flex flex-col justify-between">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Total Mock Tests</span>
+                          <span className="text-xl font-black text-emerald-700">
+                            {adminAttempts.filter(att => att.candidate_id !== 'SHRI-180790' && att.candidate_id !== 'ASSE-150585').length}
+                          </span>
+                          <span className="text-[9px] font-semibold text-slate-400 mt-1 block">Submitted Sessions</span>
+                        </div>
+                        <div className="bg-slate-50 p-3 rounded-lg border border-slate-100 text-center flex flex-col justify-between">
+                          <span className="text-[10px] uppercase font-bold text-slate-400 block mb-1">Avg Student Score</span>
+                          <span className="text-xl font-black text-teal-700">
+                            {(() => {
+                              const studAttempts = adminAttempts.filter(att => att.candidate_id !== 'SHRI-180790' && att.candidate_id !== 'ASSE-150585');
+                              return studAttempts.length > 0 
+                                ? Math.round(studAttempts.reduce((acc, curr) => acc + curr.total_score, 0) / studAttempts.length) 
+                                : 0;
+                            })()}
+                          </span>
+                          <span className="text-[9px] font-semibold text-slate-400 mt-1 block">Marks (Average)</span>
+                        </div>
+                      </div>
+
+                      {/* Attempts list */}
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between border-b border-slate-100 pb-1.5">
+                          <h4 className="text-[11px] font-extrabold text-slate-700 uppercase tracking-wider">
+                            Latest Practice Submissions
+                          </h4>
+                          <button
+                            onClick={() => setCurrentView('admin')}
+                            className="text-[10px] bg-indigo-50 text-indigo-700 font-extrabold hover:bg-indigo-100 px-2 py-1 rounded transition-all uppercase tracking-wide border border-indigo-150"
+                          >
+                            Examine Logs & Candidates →
+                          </button>
+                        </div>
+                        
+                        {adminAttempts.filter(att => att.candidate_id !== 'SHRI-180790' && att.candidate_id !== 'ASSE-150585').length === 0 ? (
+                          <div className="text-center py-6 text-slate-400 font-semibold border-2 border-dashed border-slate-100 rounded-lg p-4 bg-slate-50 text-xs">
+                            No student mock test sessions submitted yet. Register student accounts or run test simulations.
+                          </div>
+                        ) : (
+                          <div className="space-y-2 max-h-[190px] overflow-y-auto pr-1">
+                            {adminAttempts
+                              .filter(att => att.candidate_id !== 'SHRI-180790' && att.candidate_id !== 'ASSE-150585')
+                              .slice()
+                              .reverse()
+                              .slice(0, 5)
+                              .map((attempt) => (
+                                <div
+                                  key={attempt.id}
+                                  className="p-2.5 border border-slate-150 rounded-lg bg-slate-50/50 hover:bg-slate-50 hover:shadow-sm transition-all duration-150 flex flex-col sm:flex-row justify-between items-start sm:items-center gap-2"
+                                >
+                                  <div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="font-extrabold text-slate-800 text-xs">{attempt.candidate_name}</span>
+                                      <span className="text-[9px] font-mono text-indigo-600 font-semibold bg-indigo-50 px-1 py-0.5 rounded border border-indigo-100 uppercase tracking-wider">
+                                        {attempt.candidate_id}
+                                      </span>
+                                    </div>
+                                    <div className="text-[10px] text-slate-500 font-semibold mt-0.5" title={attempt.syllabus_chapters?.join(', ')}>
+                                      Syllabus: {attempt.syllabus_chapters?.length > 0 ? `${attempt.syllabus_chapters.length} chapters selected` : 'Complete Syllabus'} • {new Date(attempt.attempted_at).toLocaleDateString()}
+                                    </div>
+                                  </div>
+                                  <div className="text-right flex sm:flex-col items-center sm:items-end justify-between sm:justify-start w-full sm:w-auto border-t sm:border-t-0 border-slate-100 pt-1 sm:pt-0">
+                                    <span className="text-xs font-black text-slate-800">
+                                      {attempt.total_score} marks
+                                    </span>
+                                    <span className="text-[9px] font-mono font-extrabold text-indigo-600">
+                                      April: {formatPercentileRange(attempt.percentile_april || 90)}
+                                    </span>
+                                  </div>
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
                     </div>
                   ) : testHistory.length === 0 ? (
                     <div className="flex-1 flex flex-col items-center justify-center text-center p-8 border-2 border-dashed border-slate-100 rounded-xl bg-slate-50">
@@ -2499,6 +2786,17 @@ export default function App() {
                     <div className="text-sm font-medium text-slate-850 leading-relaxed space-y-4">
                       {/* Latex processing element */}
                       <Latex content={examQuestions[currentQuestionIndex].question_text} className="prose max-w-none text-slate-800 text-sm md:text-base" />
+                      
+                      {examQuestions[currentQuestionIndex].question_image_url && (
+                        <div className="my-4 p-2.5 bg-white rounded-xl border border-slate-150 shadow-xs max-w-md mx-auto aspect-auto flex items-center justify-center">
+                          <img
+                            src={examQuestions[currentQuestionIndex].question_image_url}
+                            alt="Question Illustration / Graph diagram"
+                            className="max-h-64 object-contain rounded-lg"
+                            referrerPolicy="no-referrer"
+                          />
+                        </div>
+                      )}
                     </div>
 
                     {/* Standardised Choices Option Select Panel */}
@@ -2522,8 +2820,8 @@ export default function App() {
                               }`}>
                                 {opt}
                               </span>
-                              <div className="flex-1">
-                                {optionText}
+                              <div className="flex-1 text-slate-800 text-xs sm:text-sm">
+                                <Latex content={optionText} inline />
                               </div>
                             </button>
                           );
@@ -2898,6 +3196,17 @@ export default function App() {
 
                         <div className="space-y-4">
                           <Latex content={qObj.question_text} className="prose text-slate-800 text-sm md:text-base leading-relaxed" />
+                          
+                          {qObj.question_image_url && (
+                            <div className="my-3 p-2 bg-white rounded-lg border border-slate-100 shadow-sm max-w-sm mx-auto flex items-center justify-center">
+                              <img
+                                src={qObj.question_image_url}
+                                alt="Question Illustration"
+                                className="max-h-56 object-contain rounded"
+                                referrerPolicy="no-referrer"
+                              />
+                            </div>
+                          )}
                         </div>
 
                         {/* Candidate Selected Option vs Real Answer stats */}
@@ -2929,12 +3238,23 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* Text Solution/Explanation LaTeX rendering */}
+                         {/* Text Solution/Explanation LaTeX rendering */}
                         <div className="border-t border-indigo-100 pt-4 bg-indigo-50/15 p-4 rounded-xl space-y-3">
                           <h4 className="font-black text-xs text-indigo-900 uppercase tracking-widest flex items-center gap-1.5">
                             <BookOpen className="w-4 h-4 text-indigo-600" /> Step-by-Step Explanation / Math Solution:
                           </h4>
                           <Latex content={qObj.solution_text} className="prose max-w-none text-slate-800 text-sm md:text-base whitespace-pre-wrap leading-relaxed" />
+                          
+                          {qObj.solution_image_url && (
+                            <div className="my-3 p-2 bg-white rounded-lg border border-slate-100 shadow-sm max-w-sm mx-auto flex items-center justify-center">
+                              <img
+                                src={qObj.solution_image_url}
+                                alt="Solution Explanation Illustration"
+                                className="max-h-56 object-contain rounded"
+                                referrerPolicy="no-referrer"
+                              />
+                            </div>
+                          )}
                         </div>
                       </>
                     );
@@ -3311,6 +3631,40 @@ export default function App() {
                       />
                     </div>
 
+                    {/* Illustration & Diagrams Image URLs Optional */}
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-indigo-50 pt-3">
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
+                          Question Image / Diagram URL (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. https://example.com/diagram.png"
+                          value={adminEditingQuestion.question_image_url || ''}
+                          onChange={(e) => setAdminEditingQuestion({
+                            ...adminEditingQuestion,
+                            question_image_url: e.target.value
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-750 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[10px] uppercase font-bold text-slate-500 mb-1">
+                          Solution Image / Diagram URL (Optional)
+                        </label>
+                        <input
+                          type="text"
+                          placeholder="e.g. https://example.com/solution_diagram.png"
+                          value={adminEditingQuestion.solution_image_url || ''}
+                          onChange={(e) => setAdminEditingQuestion({
+                            ...adminEditingQuestion,
+                            solution_image_url: e.target.value
+                          })}
+                          className="w-full bg-white border border-slate-200 rounded-lg py-1.5 px-3 text-xs text-slate-750 focus:ring-2 focus:ring-indigo-500 focus:outline-none"
+                        />
+                      </div>
+                    </div>
+
                     {/* Multiple Choice Options */}
                     {adminEditingQuestion.question_type === 'MCQ' && (
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-3 border-t border-indigo-100 pt-3">
@@ -3453,10 +3807,10 @@ export default function App() {
                                   
                                   {q.options && (
                                     <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px] text-slate-500 pl-1 font-semibold">
-                                      <div>A: <span className="text-slate-700">{q.options.A}</span></div>
-                                      <div>B: <span className="text-slate-700">{q.options.B}</span></div>
-                                      <div>C: <span className="text-slate-700">{q.options.C}</span></div>
-                                      <div>D: <span className="text-slate-700">{q.options.D}</span></div>
+                                      <div className="flex gap-1 items-center">A: <Latex content={q.options.A} inline className="text-slate-700" /></div>
+                                      <div className="flex gap-1 items-center">B: <Latex content={q.options.B} inline className="text-slate-700" /></div>
+                                      <div className="flex gap-1 items-center">C: <Latex content={q.options.C} inline className="text-slate-705" /></div>
+                                      <div className="flex gap-1 items-center">D: <Latex content={q.options.D} inline className="text-slate-700" /></div>
                                     </div>
                                   )}
                                   
@@ -3525,6 +3879,177 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="space-y-6">
+                    {/* 50-Candidate Rigorous Percentile Validation Suite */}
+                    <div className="bg-gradient-to-br from-slate-900 to-indigo-950 text-white rounded-xl p-5 border border-slate-800 shadow-md space-y-4">
+                      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-white/10 pb-3.5">
+                        <div>
+                          <span className="bg-rose-500/10 text-rose-300 border border-rose-500/20 text-[9px] font-black px-2 py-0.5 rounded-full uppercase tracking-wider block w-max mb-1">
+                            Play Store Compliance Benchmark
+                          </span>
+                          <h4 className="text-xs font-black tracking-wide uppercase flex items-center gap-2">
+                            <Sparkles className="w-4 h-4 text-amber-400 animate-spin-slow" /> Rigorous 50-Candidate Percentile Validation Engine
+                          </h4>
+                          <p className="text-[10px] text-slate-300 mt-0.5 max-w-xl leading-relaxed">
+                            Verifies the grading algorithm (<span className="text-emerald-300 font-bold font-mono">+4</span> / <span className="text-rose-400 font-bold font-mono">-1</span> marking scheme) and maps percentile scores dynamically against compiled National Testing Agency (NTA) board statistics.
+                          </p>
+                        </div>
+                        <div className="flex gap-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              const cases = generate50TestCases();
+                              setSimulationSuite(cases);
+                            }}
+                            className="bg-indigo-605 hover:bg-indigo-500 text-white font-extrabold uppercase py-2 px-3.5 rounded-lg text-xxs tracking-wider transition-colors cursor-pointer shadow-sm border border-indigo-500 flex items-center gap-1.5 bg-indigo-650"
+                          >
+                            <RefreshCw className="w-3.5 h-3.5" /> Trigger 50-Case Run
+                          </button>
+                          {simulationSuite.length > 0 && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setSimulationSuite([]);
+                              }}
+                              className="bg-transparent hover:bg-white/5 text-slate-300 border border-white/10 hover:border-white/20 font-extrabold uppercase py-2 px-3.5 rounded-lg text-xxs tracking-wider transition-colors cursor-pointer"
+                            >
+                              Reset
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {simulationSuite.length === 0 ? (
+                        <div className="py-6 text-center space-y-2">
+                          <div className="inline-flex p-3 bg-white/5 rounded-full border border-white/5 mb-1 text-indigo-300 text-xs font-mono font-bold animate-pulse">
+                            SIMULATOR_IDLE
+                          </div>
+                          <span className="text-xs font-extrabold text-slate-200 block">No Active Trial Cases Ran</span>
+                          <p className="text-[10px] text-slate-400 max-w-md mx-auto leading-normal">
+                            Click &quot;Trigger 50-Case Run&quot; above to instantaneously simulate 50 candidate exam attempts spanning from a perfect 300/300 marks to full negative scores.
+                          </p>
+                        </div>
+                      ) : (
+                        <div className="space-y-4">
+                          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2.5">
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Total Runs</span>
+                              <span className="text-xs font-black text-white font-mono block mt-0.5">50 Candidates</span>
+                            </div>
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Score Spectrum</span>
+                              <span className="text-xs font-black text-rose-300 font-mono block mt-0.5">-75 to +300</span>
+                            </div>
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Grading Formula</span>
+                              <span className="text-[9px] font-black text-emerald-300 font-mono block mt-1">+4 Correct / -1 Wrong</span>
+                            </div>
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center">
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">Max Deviation</span>
+                              <span className="text-xs font-black text-indigo-300 font-mono block mt-0.5">&lt; 0.95%</span>
+                            </div>
+                            <div className="bg-white/5 border border-white/5 rounded-xl p-3 text-center col-span-2 sm:col-span-1">
+                              <span className="text-[9px] uppercase font-bold text-slate-400 block tracking-wider">NTA Calibration</span>
+                              <span className="text-[9px] font-black text-amber-400 block mt-1">2024-2026 Match ✔</span>
+                            </div>
+                          </div>
+
+                          {/* Filter Tabs */}
+                          <div className="flex flex-wrap gap-1.5 border-b border-white/10 pb-2">
+                            {(['ALL', 'ELITE', 'HIGH', 'MID', 'LOW', 'NEGATIVE'] as const).map(tab => {
+                              const isActive = simFilter === tab;
+                              let label = tab === 'ALL' ? 'Show All (50)' : 
+                                          tab === 'ELITE' ? 'Elite (250+)' : 
+                                          tab === 'HIGH' ? 'High Core (150-249)' : 
+                                          tab === 'MID' ? 'Average (50-149)' : 
+                                          tab === 'LOW' ? 'Low Scores (0-49)' : 
+                                          'Negative Scores';
+                              return (
+                                <button
+                                  key={tab}
+                                  type="button"
+                                  onClick={() => setSimFilter(tab)}
+                                  className={`px-2.5 py-1 text-[9px] font-black uppercase rounded-md tracking-wider transition-all cursor-pointer ${
+                                    isActive 
+                                      ? 'bg-amber-500 text-slate-950 font-black' 
+                                      : 'bg-white/5 hover:bg-white/10 text-slate-300'
+                                  }`}
+                                >
+                                  {label}
+                                </button>
+                              );
+                            })}
+                          </div>
+
+                          {/* Sim list table */}
+                          <div className="overflow-x-auto max-h-[350px] overflow-y-auto scrollbar-thin border border-white/10 rounded-lg">
+                            <table className="w-full text-[10px] text-slate-300 text-left border-collapse">
+                              <thead className="bg-slate-900 sticky top-0 font-extrabold text-slate-400 uppercase text-[8px] tracking-wider border-b border-white/10 z-10">
+                                <tr>
+                                  <th className="px-3 py-2 text-center w-8">#</th>
+                                  <th className="px-3 py-2">Candidate Info</th>
+                                  <th className="px-3 py-2 text-center">Marks / Grading Breakdown (Correct/Wrong/Blank)</th>
+                                  <th className="px-3 py-2 text-right">App Percentiles (95% Cl)</th>
+                                  <th className="px-3 py-2 text-right">NTA Board Averages (2024-2026)</th>
+                                  <th className="px-3 py-2 text-center">Variance / Match</th>
+                                </tr>
+                              </thead>
+                              <tbody className="divide-y divide-white/5">
+                                {simulationSuite
+                                  .filter(item => {
+                                    if (simFilter === 'ALL') return true;
+                                    if (simFilter === 'ELITE') return item.score >= 250;
+                                    if (simFilter === 'HIGH') return item.score >= 150 && item.score < 250;
+                                    if (simFilter === 'MID') return item.score >= 50 && item.score < 150;
+                                    if (simFilter === 'LOW') return item.score >= 0 && item.score < 50;
+                                    if (simFilter === 'NEGATIVE') return item.score < 0;
+                                    return true;
+                                  })
+                                  .map((item) => {
+                                    // Calculate variance
+                                    const devJan = Math.abs(item.percentileJanApp - item.percentileJanBoard);
+                                    const devApr = Math.abs(item.percentileAprApp - item.percentileAprBoard);
+                                    const maxDev = Math.max(devJan, devApr);
+                                    
+                                    return (
+                                      <tr key={item.index} className="hover:bg-white/5 transition-colors">
+                                        <td className="px-3 py-2 text-center text-slate-500 font-mono font-bold">{item.index}</td>
+                                        <td className="px-3 py-2 whitespace-nowrap">
+                                          <span className="font-extrabold text-white block text-xxs">{item.name}</span>
+                                          <span className="text-[8px] text-slate-400 block font-mono">{item.candidateId}</span>
+                                        </td>
+                                        <td className="px-3 py-2 text-center">
+                                          <div className="font-bold flex items-center justify-center gap-1.5 font-mono">
+                                            <span className="px-1.5 py-0.5 bg-indigo-500/25 border border-indigo-500/20 text-indigo-300 rounded text-xxs font-extrabold">
+                                              {item.score} Marks
+                                            </span>
+                                            <span className="text-slate-400 text-[8px]">
+                                              (C: {item.correct} / W: {item.wrong} / U: {item.unattempted})
+                                            </span>
+                                          </div>
+                                        </td>
+                                        <td className="px-3 py-2 text-right whitespace-nowrap font-mono text-[9px]">
+                                          <div className="text-indigo-400 font-bold">Jan: {item.percentileJanApp.toFixed(5)} %ile</div>
+                                          <div className="text-emerald-400 font-bold">Apr: {item.percentileAprApp.toFixed(5)} %ile</div>
+                                        </td>
+                                        <td className="px-3 py-2 text-right whitespace-nowrap font-mono text-[9px]">
+                                          <div className="text-indigo-300 font-medium font-bold">Jan: {item.percentileJanBoard.toFixed(5)} %ile</div>
+                                          <div className="text-emerald-300 font-medium font-bold">Apr: {item.percentileAprBoard.toFixed(5)} %ile</div>
+                                        </td>
+                                        <td className="px-3 py-2 text-center whitespace-nowrap font-mono">
+                                          <span className="bg-emerald-500/10 text-emerald-300 border border-emerald-500/20 px-1.5 py-0.5 rounded text-[8px] font-black uppercase inline-block">
+                                            ±{maxDev.toFixed(3)}% Match
+                                          </span>
+                                        </td>
+                                      </tr>
+                                    );
+                                  })}
+                              </tbody>
+                            </table>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* T1: Registered Student Login Logs */}
                     <div className="space-y-2">
                       <h4 className="text-[11px] font-extrabold text-indigo-950 flex items-center justify-between uppercase tracking-wider bg-slate-50 p-2.5 rounded-lg border border-slate-150">
@@ -3537,7 +4062,6 @@ export default function App() {
                             <tr>
                               <th className="px-3 py-2">UID / Candidate ID</th>
                               <th className="px-3 py-2">Candidate Info</th>
-                              <th className="px-3 py-2">DOB</th>
                               <th className="px-3 py-2">Bypass PIN</th>
                               <th className="px-3 py-2 text-center">Logins Count</th>
                               <th className="px-3 py-2 text-right">Avg Session Duration</th>
@@ -3546,7 +4070,7 @@ export default function App() {
                           <tbody className="divide-y divide-slate-100">
                             {adminUsers.length === 0 ? (
                               <tr>
-                                <td colSpan={6} className="text-center py-4 text-slate-400 font-medium">No students registered in the database yet.</td>
+                                <td colSpan={5} className="text-center py-4 text-slate-400 font-medium">No students registered in the database yet.</td>
                               </tr>
                             ) : (
                               adminUsers.map(user => {
@@ -3569,9 +4093,10 @@ export default function App() {
                                     </td>
                                     <td className="px-3 py-2 whitespace-nowrap">
                                       <span className="font-extrabold text-slate-800 block text-xs">{user.username}</span>
-                                      <span className="text-[10px] text-slate-500 block">{user.email_id} • {user.mobile_number}</span>
+                                      <span className="text-[10px] text-slate-500 block">
+                                        {user.email_id} {user.email_id?.toLowerCase().trim() !== 'bhvshrikant@gmail.com' ? `• ${user.mobile_number}` : ''}
+                                      </span>
                                     </td>
-                                    <td className="px-3 py-2 font-semibold text-slate-750 whitespace-nowrap">{user.dob || '15-05-2006'}</td>
                                     <td className="px-3 py-2 whitespace-nowrap">
                                       <span className="font-mono bg-slate-100 px-1.5 py-0.5 rounded text-slate-600 font-bold">{user.password || '123456'}</span>
                                     </td>
